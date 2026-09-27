@@ -8,14 +8,15 @@ GitLog é um projeto de portfólio de Engenharia de Dados e Software que irá
 transformar atividade real da API pública do GitHub em dados estruturados e análises.
 O desenvolvimento é incremental, com entregas executáveis e verificáveis.
 
-**Estado atual: Fase 2 — ingestão de repositories.** O pipeline consulta a API,
-preserva o JSON original, valida os campos e faz UPSERT no PostgreSQL com auditoria
-por execução. O cliente HTTP possui paginação, timeout, rate limit e retries.
-Commits, transformações e dashboard ainda estão planejados; o MVP não está concluído.
+**Estado atual: Fase 3 — repositories e commits incrementais.** O pipeline consulta
+a API real, preserva JSON por página, valida os campos e faz UPSERT no PostgreSQL
+com auditoria por execução. Commits usam checkpoint por repositório, deduplicação
+por repository ID + SHA e paginação com rate limit e retries. Transformações e
+dashboard continuam planejados.
 
 ## Architecture
 
-O fluxo até PostgreSQL está implementado para repositories. dbt, camada analítica
+O fluxo até PostgreSQL está implementado para repositories e commits. dbt, camada analítica
 e Metabase representam etapas futuras:
 
 ```mermaid
@@ -39,7 +40,7 @@ Detalhes e limites de cada etapa: [arquitetura](docs/architecture.md).
 | Qualidade | pytest, Ruff, Black | Configurado |
 | Cliente GitHub | HTTPX síncrono | Implementado |
 | Validação / configuração do pipeline | Pydantic, python-dotenv | Implementado |
-| Persistência | Psycopg 3, migrações SQL | Implementado para repositories |
+| Persistência | Psycopg 3, migrações SQL | Repositories, commits, checkpoints e auditoria |
 | Transformação / visualização | dbt Core, Metabase | Planejado |
 | Orquestração / data lake | Airflow, MinIO | Fases posteriores |
 
@@ -54,16 +55,22 @@ Detalhes e limites de cada etapa: [arquitetura](docs/architecture.md).
 - Exceptions próprias e logs com campos estruturados, sem tokens ou payloads.
 - Snapshots JSON imutáveis, validação de repositories e UPSERT pelo ID do GitHub.
 - Migrações com checksum, role de ingestão restrita e auditoria transacional.
+- Commits incrementais pela diferença entre SHAs, com checkpoint confirmado
+  junto com os dados e a auditoria; reexecuções não criam duplicatas.
 
 ## Data Pipeline
 
 `gitlog repositories` executa `GitHub → Python → Raw JSON → PostgreSQL` para os
 repositórios configurados. `gitlog migrate` prepara o schema e a role de ingestão.
-Commits serão adicionados na Fase 3. Consulte o [contrato do pipeline](docs/pipeline.md).
+`gitlog commits` ingere o histórico da branch padrão e, nas próximas execuções,
+somente a diferença desde o checkpoint. Também atualiza os metadados do repositório;
+não exige uma execução prévia de `repositories`.
+Consulte o [contrato do pipeline](docs/pipeline.md).
 
 ## Data Model
 
-O schema `raw` contém `repositories` e `pipeline_runs`. A tabela de controle de
+O schema `raw` contém `repositories`, `commits`, `ingestion_checkpoints` e
+`pipeline_runs`. A tabela de controle de
 migrações fica em `public`. Campos, constraints e limites estão no
 [modelo de dados](docs/data-model.md).
 
@@ -81,6 +88,7 @@ docker compose up -d --wait
 make setup
 make migrate
 make run
+make commits
 ```
 
 `make setup` cria `.venv` e instala o projeto com as dependências de desenvolvimento.
@@ -116,7 +124,7 @@ Somente as três variáveis de inicialização `POSTGRES_DB`,
 
 O usuário criado pela imagem oficial é administrador do banco local, usado pelas
 migrações. `make migrate` provisiona uma role separada com `USAGE` no schema `raw`
-e `SELECT`, `INSERT`, `UPDATE` nas duas tabelas. A ingestão usa essa role.
+e `SELECT`, `INSERT`, `UPDATE` nas quatro tabelas. A ingestão usa essa role.
 Essa configuração não é uma implantação de produção.
 
 ## Running locally
@@ -127,6 +135,8 @@ docker compose ps
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 make migrate             # Aplica migrações e provisiona a role restrita
 make run                 # Ingere os repositórios configurados usando a API real
+make commits             # Histórico de commits e próximas cargas incrementais
+.venv/bin/gitlog commits --full-refresh  # Reconcilia todo o histórico alcançável
 .venv/bin/gitlog --version
 make down                # Para e remove containers; preserva o volume
 ```
@@ -178,7 +188,8 @@ simulado; o transporte HTTP real é bloqueado nos testes unitários e de integra
 `make test` pula os testes de banco quando não há configuração do runner.
 `make test-integration` cria um projeto Compose isolado com porta dinâmica e
 credenciais temporárias, executa os testes e remove seu container e volume.
-Os testes cobrem UPSERT, rollback, auditoria, migrações, permissões e a CLI.
+Os testes cobrem UPSERT, rollback, auditoria, migrações, permissões, paginação,
+incremental, concorrência, histórico reescrito e a CLI.
 
 ## Dashboard
 
@@ -194,10 +205,19 @@ Testes de qualidade dbt serão adicionados com a camada de transformação.
 
 ## Incremental Loading
 
-Planejado para commits na Fase 3: estado persistido, checkpoints avançados somente
-após carga bem-sucedida e UPSERT com chave composta de repositório e SHA.
-Essa capacidade ainda não está disponível. Repositories usa uma consulta completa
-por repositório a cada execução e atualiza seu estado atual por UPSERT.
+Commits fixam o SHA da branch padrão antes de paginar. A primeira execução lê
+todo o histórico; a próxima compara o checkpoint com a nova ponta. Datas antigas
+em commits incorporados por merge não os excluem da carga. Se o SHA não mudou,
+nenhuma página de commits é requisitada e as contagens são zero.
+
+Dados, checkpoint e auditoria de sucesso são confirmados na mesma transação.
+Histórico divergente, base indisponível ou mudança de branch provocam reconciliação
+completa. `--full-refresh` força essa reconciliação; commits já observados são
+preservados mesmo após force-push. A carga cobre a branch padrão, não todas as branches.
+
+`records_extracted` conta registros de commits recebidos nas páginas processadas;
+`records_loaded` conta commits distintos inseridos ou efetivamente atualizados.
+Registros idênticos não são regravados. Veja a [decisão de incremental](docs/decisions/ADR-003-incremental-commits.md).
 
 ## Project Structure
 
@@ -205,7 +225,7 @@ por repositório a cada execução e atualiza seu estado atual por UPSERT.
 gitlog/
 ├── ingestion/
 │   ├── __init__.py
-│   ├── main.py              # CLI: migrate, repositories, ajuda e versão
+│   ├── main.py              # CLI: migrate, repositories, commits, ajuda e versão
 │   ├── config.py
 │   ├── logging_config.py
 │   ├── db/                  # Runner de migrações e SQL versionado
@@ -224,6 +244,7 @@ gitlog/
 │   ├── test_github_client.py
 │   ├── test_rate_limit.py
 │   ├── test_repositories.py
+│   ├── test_commits.py
 │   ├── fixtures/
 │   └── integration/
 ├── scripts/
@@ -235,7 +256,8 @@ gitlog/
 │   ├── github-client.md
 │   └── decisions/
 │       ├── ADR-001-use-postgresql.md
-│       └── ADR-002-github-client.md
+│       ├── ADR-002-github-client.md
+│       └── ADR-003-incremental-commits.md
 ├── docker-compose.yml
 ├── pyproject.toml
 ├── .env.example
@@ -252,7 +274,7 @@ essas etapas forem implementadas.
 - [x] Fase 0: bootstrap Python, qualidade, documentação e PostgreSQL local.
 - [x] Fase 1: GitHub API Client — autenticação, paginação, timeout, rate limit e retries.
 - [x] Fase 2: repositories — API → Raw JSON → PostgreSQL.
-- [ ] Fase 3: commits — paginação, incremental e idempotência; validação do MVP.
+- [x] Fase 3: commits — paginação, incremental e idempotência; validação do MVP.
 - [ ] Fase 4: issues e pull requests.
 - [ ] Fase 5: ampliar qualidade, auditoria e recuperação de falhas.
 - [ ] Fase 6: dbt — staging, dimensões, fatos e testes.
@@ -263,7 +285,7 @@ essas etapas forem implementadas.
 - [ ] Fase 11: Spring Boot Analytics API.
 - [ ] Fase 12: deploy em cloud.
 
-Checkpoints, constraints e rastreabilidade necessários ao MVP devem ser
+Checkpoints, constraints e rastreabilidade necessários ao MVP foram
 implementados nas fases 2–3; a Fase 5 amplia essas garantias.
 
 ## Future Improvements
