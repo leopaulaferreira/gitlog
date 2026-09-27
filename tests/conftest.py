@@ -1,7 +1,27 @@
-"""Isolate credentials and prevent accidental real HTTP in every unit test."""
+"""Isolate configuration and block real HTTP in unit and integration tests."""
+
+import json
+from pathlib import Path
 
 import httpx
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolate_pipeline_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Integration connections use GITLOG_TEST_CONFIG from the isolated runner.
+    for name in (
+        "GITLOG_REPOSITORIES",
+        "GITLOG_RAW_DIR",
+        "GITLOG_DB_USER",
+        "GITLOG_DB_PASSWORD",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -9,6 +29,16 @@ def isolate_github(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GITHUB_TOKEN", "test-token-not-a-real-secret")
 
     def deny_network(*args: object, **kwargs: object) -> None:
-        pytest.fail("Real HTTP is forbidden in unit tests; use MockTransport.")
+        pytest.fail("Real HTTP is forbidden in tests; use MockTransport.")
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", deny_network)
+
+
+@pytest.fixture
+def repository_payload() -> dict:
+    # Fixtures are never used by the CLI or production ingestion code.
+    return json.loads(
+        (Path(__file__).parent / "fixtures" / "repository.json").read_text(
+            encoding="utf-8"
+        )
+    )

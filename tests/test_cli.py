@@ -19,7 +19,9 @@ def test_module_displays_bootstrap_help(args: list[str], tmp_path: Path) -> None
         check=False,
     )
     assert result.returncode == 0
-    assert "ingestion is not implemented yet" in result.stdout
+    assert "repository ingestion" in result.stdout
+    assert "repositories" in result.stdout
+    assert "migrate" in result.stdout
     assert "--version" in result.stdout
     assert result.stderr == ""
 
@@ -46,4 +48,38 @@ def test_unimplemented_command_fails_clearly(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 2
-    assert "unrecognized arguments: commits" in result.stderr
+    assert "invalid choice: 'commits'" in result.stderr
+
+
+def test_sql_migration_is_available_outside_checkout(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from importlib.resources import files; "
+            "assert 'CREATE TABLE raw.repositories' in "
+            "files('ingestion.db').joinpath('migrations/001_repositories.sql').read_text()",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_cli_invalid_configuration_exits_with_safe_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GITLOG_DB_PASSWORD", "")
+    result = subprocess.run(
+        [sys.executable, "-m", "ingestion.main", "repositories"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert '"event": "command.failed"' in result.stderr
+    assert '"error_type": "ValidationError"' in result.stderr
+    assert "Traceback" not in result.stderr
