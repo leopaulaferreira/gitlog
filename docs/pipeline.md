@@ -30,6 +30,31 @@ O container, a rede e o volume usados na validação foram removidos. Nenhuma
 chamada à API GitHub foi necessária. Essa verificação não testa ingestão ou
 persistência de entidades, que ainda não existem.
 
+## Fase 1 — cliente HTTP
+
+`GitHubClient` realiza consultas explícitas, mas ainda não há um serviço de
+ingestão. `make run` continua exibindo ajuda. A classe lê `GITHUB_TOKEN` do ambiente
+e permite testar o acesso sem PostgreSQL. Veja o [contrato do cliente](github-client.md).
+
+Os testes unitários usam mocks de HTTP e de tempo para validar os headers,
+timeouts, classificação de erros, paginação, redirects, rate limit e limites de
+retry. Nenhuma chamada à API real é feita na validação automatizada.
+
+### Validação realizada na Fase 1
+
+| Verificação | Resultado |
+| --- | --- |
+| `make check` no Python 3.14 | Ruff e Black aprovados; 132 testes passaram |
+| Instalação não editável e pytest no Python 3.12 em container | 132 testes passaram |
+| Cobertura de `ingestion/client` no Python 3.12 | 100% das linhas executáveis e ramificações, usando coverage.py |
+| `pip check` | Dependências compatíveis |
+| `make compose-check` | Configuração válida; sem alterações no serviço PostgreSQL |
+
+A medição de cobertura usou uma ferramenta instalada somente no container
+temporário, sem adicionar dependência ao projeto. Cobertura não substitui uma
+validação com a API real: essa execução verificou contratos simulados, sem rede,
+persistência ou credenciais reais.
+
 ## Contrato planejado para o MVP
 
 1. Ler e validar configuração e repositórios.
@@ -51,7 +76,7 @@ Particionamento raw proposto:
 data/raw/commits/repository=spring-projects_spring-boot/year=2026/month=09/day=26/
 ```
 
-Os testes unitários do cliente usarão mocks/fixtures, sem chamar a API real.
+Os testes unitários do cliente usam mocks/fixtures, sem chamar a API real.
 Os testes do loader usarão PostgreSQL de teste isolado. Dados de dashboard virão
 exclusivamente de coletas reais; fixtures ficarão restritas aos testes.
 
@@ -59,4 +84,4 @@ exclusivamente de coletas reais; fixtures ficarão restritas aos testes.
 
 Após configurar o token e iniciar o banco, o usuário deverá ingerir repositories
 e commits, consultar ambos no PostgreSQL, repetir a execução sem duplicatas e
-executar `pytest` com sucesso. A Fase 0 ainda não satisfaz esse critério.
+executar `pytest` com sucesso. A Fase 1 ainda não satisfaz esse critério.

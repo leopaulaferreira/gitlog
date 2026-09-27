@@ -23,7 +23,7 @@ format-check:
 
 check: lint format-check test
 
-# Phase 0: show available bootstrap commands; ingestion arrives later.
+# Show available project commands; ingestion arrives in Phase 2.
 run:
 	$(BIN)/python -m ingestion.main
 

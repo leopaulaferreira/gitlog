@@ -1,9 +1,12 @@
 # Arquitetura do GitLog
 
-## Estado atual — Fase 0
+## Estado atual — Fase 1
 
-O pacote `ingestion` fornece apenas ajuda e versão via `argparse`. Não possui
-dependências de runtime, não acessa rede e não se conecta ao banco.
+O pacote `ingestion` fornece ajuda e versão via `argparse`, sem efeitos de rede.
+O subpacote `ingestion.client` usa HTTPX para consultas GET explícitas ao GitHub,
+com sessão reutilizável, paginação, tratamento de erros e esperas limitadas.
+`rate_limit.py` interpreta os headers; `exceptions.py` define os erros públicos.
+Não há conexão Python com o banco ou persistência de entidades nesta fase.
 `pyproject.toml` configura empacotamento, pytest, Ruff e Black. O Makefile usa o
 ambiente virtual local sem exigir ativação manual.
 
@@ -32,7 +35,7 @@ uma role de ingestão com permissões restritas deve preceder a implementação 
 7. **MinIO:** substituir o armazenamento raw local quando houver necessidade.
 8. **Spring Boot:** API opcional que consulta exclusivamente a camada analytics.
 
-Esses componentes futuros não são requisitos para executar a Fase 0.
+Esses componentes futuros não são requisitos para executar a Fase 1.
 
 ## Configuração e segurança
 
@@ -52,3 +55,5 @@ fixação por lockfile/digest poderá ser adotada na fase de CI/CD.
 - [Imagem oficial PostgreSQL](https://hub.docker.com/_/postgres)
 - [Guia oficial de pyproject.toml](https://packaging.python.org/en/latest/guides/writing-pyproject-toml/)
 - [ADR-001: PostgreSQL](decisions/ADR-001-use-postgresql.md)
+- [ADR-002: cliente GitHub síncrono](decisions/ADR-002-github-client.md)
+- [Contrato do cliente](github-client.md)
