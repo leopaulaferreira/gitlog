@@ -84,6 +84,7 @@ def _provision_writer(
     )
     connection.execute(
         sql.SQL(
-            "GRANT SELECT, INSERT, UPDATE ON raw.repositories, raw.pipeline_runs TO {}"
+            "GRANT SELECT, INSERT, UPDATE ON raw.repositories, raw.pipeline_runs, "
+            "raw.commits, raw.ingestion_checkpoints TO {}"
         ).format(sql.Identifier(settings.user))
     )
