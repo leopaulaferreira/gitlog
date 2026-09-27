@@ -1,16 +1,19 @@
 # Arquitetura do GitLog
 
-## Estado atual — Fase 2
+## Estado atual — Fase 3
 
 O pacote `ingestion` fornece ajuda, versão, migrações e ingestão via `argparse`.
 Ajuda e versão não abrem conexões; `repositories` executa a ingestão configurada.
+`commits` executa ingestão incremental com checkpoint persistido por repositório.
 O subpacote `ingestion.client` usa HTTPX para consultas GET explícitas ao GitHub,
 com sessão reutilizável, paginação, tratamento de erros e esperas limitadas.
 `rate_limit.py` interpreta os headers; `exceptions.py` define os erros públicos.
 `extractors.repositories` consulta cada repositório; `loaders.raw_loader` preserva
 o JSON antes da validação em `models.github_models`. O serviço coordena essas
 etapas e o loader PostgreSQL faz UPSERT e confirma o sucesso da auditoria na mesma
-transação. A configuração usa Pydantic e a conexão usa Psycopg 3.
+transação. O serviço de commits fixa a referência da branch padrão, preserva as
+páginas completas e usa comparação de SHAs para incremental. O checkpoint participa
+da transação de carga. A configuração usa Pydantic e a conexão usa Psycopg 3.
 `pyproject.toml` configura empacotamento, pytest, Ruff e Black. O Makefile usa o
 ambiente virtual local sem exigir ativação manual.
 
@@ -22,18 +25,18 @@ usuário `postgres`; não se força um UID que prejudique a inicialização.
 O healthcheck verifica disponibilidade do servidor, não migrações, permissões da
 aplicação ou completude de dados. O usuário de bootstrap é administrador local;
 `migrate` provisiona a role de ingestão com `USAGE` no schema `raw` e permissões
-de leitura, inserção e atualização nas tabelas de repositories e auditoria.
+de leitura, inserção e atualização nas tabelas de repositories, commits, checkpoints
+e auditoria.
 Migrações SQL empacotadas são aplicadas em transação, com lock e checksum.
 
 ## Evolução planejada
 
-1. **Ingestão Python:** ampliar o pipeline de repositories para commits e depois
+1. **Ingestão Python:** ampliar os pipelines de repositories e commits para
    outras entidades, reutilizando cliente, validação e serviço de execução.
 2. **Raw Layer local:** ampliar os snapshots imutáveis particionados por entidade,
    repositório e data UTC de extração para as novas entidades.
-3. **PostgreSQL:** adicionar commits e checkpoints ao schema `raw`, que já contém
-   repositories e auditoria. `staging` e `analytics` serão responsabilidade das
-   transformações.
+3. **PostgreSQL:** ampliar o schema `raw`, que já contém repositories, commits,
+   checkpoints e auditoria. `staging` e `analytics` serão responsabilidade das transformações.
 4. **dbt:** limpeza, dimensões, fatos, documentação e testes de qualidade.
 5. **Metabase:** consumir a camada analítica com filtros e métricas reais.
 6. **Airflow:** orquestrar o pipeline já funcional pela CLI; execução manual deve
@@ -41,7 +44,7 @@ Migrações SQL empacotadas são aplicadas em transação, com lock e checksum.
 7. **MinIO:** substituir o armazenamento raw local quando houver necessidade.
 8. **Spring Boot:** API opcional que consulta exclusivamente a camada analytics.
 
-Esses componentes futuros não são requisitos para executar a Fase 2.
+Esses componentes futuros não são requisitos para executar a Fase 3.
 
 ## Configuração e segurança
 

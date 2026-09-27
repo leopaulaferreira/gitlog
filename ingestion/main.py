@@ -1,4 +1,4 @@
-"""Run explicit schema migrations or the repository ingestion pipeline."""
+"""Run schema migrations, repository ingestion or incremental commit ingestion."""
 
 import argparse
 import logging
