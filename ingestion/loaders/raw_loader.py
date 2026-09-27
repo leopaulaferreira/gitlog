@@ -42,15 +42,32 @@ class RawLoader:
         payload: Payload,
         extracted_at: datetime,
     ) -> Path:
+        return self.save_document(
+            "commits", repository, run_id, document, payload, extracted_at
+        )
+
+    def save_document(
+        self,
+        entity: str,
+        repository: str,
+        run_id: UUID,
+        document: str,
+        payload: Payload,
+        extracted_at: datetime,
+    ) -> Path:
+        if entity not in ("commits", "issues", "pull_requests"):
+            raise ValueError("Invalid snapshot entity.")
         validate_repository_name(repository)
         if extracted_at.tzinfo is None:
             raise ValueError("Extraction time must be timezone aware.")
-        if not re.fullmatch(r"repository|reference|manifest|page-[0-9]+", document):
-            raise ValueError("Invalid commit snapshot document.")
+        if not re.fullmatch(
+            r"repository|reference|manifest|page-[0-9]+|pull-request-[0-9]+", document
+        ):
+            raise ValueError("Invalid snapshot document.")
         instant = extracted_at.astimezone(UTC)
         destination = (
             self.root.resolve()
-            / "commits"
+            / entity
             / f"repository={repository.lower().replace('/', '_')}"
             / f"year={instant:%Y}"
             / f"month={instant:%m}"
