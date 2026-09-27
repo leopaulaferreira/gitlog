@@ -8,15 +8,16 @@ GitLog é um projeto de portfólio de Engenharia de Dados e Software que irá
 transformar atividade real da API pública do GitHub em dados estruturados e análises.
 O desenvolvimento é incremental, com entregas executáveis e verificáveis.
 
-**Estado atual: Fase 3 — repositories e commits incrementais.** O pipeline consulta
+**Estado atual: Fase 4 — repositories, commits, issues e pull requests.** O pipeline consulta
 a API real, preserva JSON por página, valida os campos e faz UPSERT no PostgreSQL
 com auditoria por execução. Commits usam checkpoint por repositório, deduplicação
-por repository ID + SHA e paginação com rate limit e retries. Transformações e
+por repository ID + SHA e paginação com rate limit e retries. Issues e PRs têm
+UPSERT e checkpoints de atualização separados, sem carregar PRs como issues. Transformações e
 dashboard continuam planejados.
 
 ## Architecture
 
-O fluxo até PostgreSQL está implementado para repositories e commits. dbt, camada analítica
+O fluxo até PostgreSQL está implementado para repositories, commits, issues e PRs. dbt, camada analítica
 e Metabase representam etapas futuras:
 
 ```mermaid
@@ -40,7 +41,7 @@ Detalhes e limites de cada etapa: [arquitetura](docs/architecture.md).
 | Qualidade | pytest, Ruff, Black | Configurado |
 | Cliente GitHub | HTTPX síncrono | Implementado |
 | Validação / configuração do pipeline | Pydantic, python-dotenv | Implementado |
-| Persistência | Psycopg 3, migrações SQL | Repositories, commits, checkpoints e auditoria |
+| Persistência | Psycopg 3, migrações SQL | Repositories, commits, issues, PRs, checkpoints e auditoria |
 | Transformação / visualização | dbt Core, Metabase | Planejado |
 | Orquestração / data lake | Airflow, MinIO | Fases posteriores |
 
@@ -57,6 +58,8 @@ Detalhes e limites de cada etapa: [arquitetura](docs/architecture.md).
 - Migrações com checksum, role de ingestão restrita e auditoria transacional.
 - Commits incrementais pela diferença entre SHAs, com checkpoint confirmado
   junto com os dados e a auditoria; reexecuções não criam duplicatas.
+- Issues abertas/fechadas e PRs abertos/fechados/merged com identidade correta,
+  snapshots completos e atualização incremental por entidade e repositório.
 
 ## Data Pipeline
 
@@ -65,11 +68,14 @@ repositórios configurados. `gitlog migrate` prepara o schema e a role de ingest
 `gitlog commits` ingere o histórico da branch padrão e, nas próximas execuções,
 somente a diferença desde o checkpoint. Também atualiza os metadados do repositório;
 não exige uma execução prévia de `repositories`.
+`gitlog issues` e `gitlog pull-requests` carregam as novas entidades com checkpoints
+independentes. `gitlog all` executa repositories, commits, issues e PRs nessa ordem.
 Consulte o [contrato do pipeline](docs/pipeline.md).
 
 ## Data Model
 
-O schema `raw` contém `repositories`, `commits`, `ingestion_checkpoints` e
+O schema `raw` contém `repositories`, `commits`, `issues`, `pull_requests`,
+`ingestion_checkpoints` (commits), `entity_checkpoints` (issues/PRs) e
 `pipeline_runs`. A tabela de controle de
 migrações fica em `public`. Campos, constraints e limites estão no
 [modelo de dados](docs/data-model.md).
@@ -89,6 +95,9 @@ make setup
 make migrate
 make run
 make commits
+make issues
+make pull-requests
+# Ou execute todos os pipelines com: make ingest-all
 ```
 
 `make setup` cria `.venv` e instala o projeto com as dependências de desenvolvimento.
@@ -115,7 +124,7 @@ Para mostrar somente a ajuda, execute `.venv/bin/gitlog --help`.
 | `POSTGRES_USER` | Usuário de inicialização local; padrão `gitlog` |
 | `POSTGRES_PASSWORD` | Obrigatória no Compose; substitua o exemplo em `.env` |
 
-O Compose lê `.env` automaticamente. Os comandos `migrate` e `repositories`
+O Compose lê `.env` automaticamente. Os comandos de migração e ingestão
 carregam `.env` do diretório atual sem sobrescrever variáveis já exportadas.
 Ao usar `GitHubClient` diretamente em Python, defina `GITHUB_TOKEN` no ambiente;
 a classe não carrega `.env` implicitamente.
@@ -124,7 +133,7 @@ Somente as três variáveis de inicialização `POSTGRES_DB`,
 
 O usuário criado pela imagem oficial é administrador do banco local, usado pelas
 migrações. `make migrate` provisiona uma role separada com `USAGE` no schema `raw`
-e `SELECT`, `INSERT`, `UPDATE` nas quatro tabelas. A ingestão usa essa role.
+e `SELECT`, `INSERT`, `UPDATE` nas sete tabelas. A ingestão usa essa role.
 Essa configuração não é uma implantação de produção.
 
 ## Running locally
@@ -136,6 +145,9 @@ docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 make migrate             # Aplica migrações e provisiona a role restrita
 make run                 # Ingere os repositórios configurados usando a API real
 make commits             # Histórico de commits e próximas cargas incrementais
+make issues              # Issues abertas/fechadas, excluindo PRs
+make pull-requests       # PRs com os campos de merge
+make ingest-all          # Os quatro pipelines, com auditorias independentes
 .venv/bin/gitlog commits --full-refresh  # Reconcilia todo o histórico alcançável
 .venv/bin/gitlog --version
 make down                # Para e remove containers; preserva o volume
@@ -190,6 +202,9 @@ simulado; o transporte HTTP real é bloqueado nos testes unitários e de integra
 credenciais temporárias, executa os testes e remove seu container e volume.
 Os testes cobrem UPSERT, rollback, auditoria, migrações, permissões, paginação,
 incremental, concorrência, histórico reescrito e a CLI.
+Os testes de issues/PRs cobrem páginas mistas, ID de issue diferente do ID de PR,
+estados aberto/fechado/merged, repetição sem duplicação, atualização de registros,
+checkpoints separados, falhas de raw/SQL/paginação e preservação da Fase 3 na migração.
 
 ## Dashboard
 
@@ -219,13 +234,50 @@ preservados mesmo após force-push. A carga cobre a branch padrão, não todas a
 `records_loaded` conta commits distintos inseridos ou efetivamente atualizados.
 Registros idênticos não são regravados. Veja a [decisão de incremental](docs/decisions/ADR-003-incremental-commits.md).
 
+### Issues e Pull Requests
+
+```bash
+source .venv/bin/activate
+python -m ingestion.main migrate
+python -m ingestion.main issues
+python -m ingestion.main pull-requests
+python -m ingestion.main all
+```
+
+Os três comandos aceitam `--per-page 1..100` e `--full-refresh`. Para atualizar uma
+instalação da Fase 3, execute `migrate`: a migração `003_issues_pull_requests.sql`
+adiciona as tabelas e permissões sem alterar repositories, commits ou seus checkpoints.
+
+O endpoint `/issues` inclui PRs. A presença da chave `pull_request` exclui o item
+da tabela de issues, mesmo quando seu valor é nulo. Para PRs, esse endpoint serve
+apenas à descoberta incremental: cada número selecionado é consultado em
+`/pulls/{number}` para obter o ID real e os campos `merged_at`, `merge_commit_sha`
+e `draft`. `merge_commit_sha` preenchido não significa, sozinho, que houve merge.
+
+Cada entidade mantém um checkpoint por repository ID. A consulta usa `state=all`
+e `since=checkpoint-5 minutos`, seguindo todas as páginas pelo `GitHubClient`.
+A ordenação por criação evita que uma edição mude a posição do item durante a
+paginação. O checkpoint registra o início da descoberta, somente após confirmar
+dados e auditoria na mesma transação. Em falha, permanece no valor anterior.
+
+As tabelas têm PK pelo ID da própria entidade e `UNIQUE (repository_id, number)`.
+O UPSERT não regrava dados iguais e não substitui uma versão por outra com
+`updated_at` anterior. As métricas contam os itens selecionados da entidade em
+`records_extracted` e as identidades inseridas/alteradas em `records_loaded`.
+Uma releitura da janela pode extrair registros conhecidos e carregar zero.
+
+Em `all`, cada pipeline/repositório tem sua auditoria e transação; uma falha
+individual auditável não impede os pipelines seguintes. O comando retorna 1 se
+houver qualquer falha e 0 se todos terminarem com sucesso. `all` não executa
+migrações automaticamente. Detalhes e limites: [Issues e PRs](docs/issues-pull-requests.md).
+
 ## Project Structure
 
 ```text
 gitlog/
 ├── ingestion/
 │   ├── __init__.py
-│   ├── main.py              # CLI: migrate, repositories, commits, ajuda e versão
+│   ├── main.py              # CLI: migrate, repositories, commits, issues, pull-requests, all
 │   ├── config.py
 │   ├── logging_config.py
 │   ├── db/                  # Runner de migrações e SQL versionado
@@ -245,6 +297,7 @@ gitlog/
 │   ├── test_rate_limit.py
 │   ├── test_repositories.py
 │   ├── test_commits.py
+│   ├── test_issues_pull_requests.py
 │   ├── fixtures/
 │   └── integration/
 ├── scripts/
@@ -254,6 +307,7 @@ gitlog/
 │   ├── data-model.md
 │   ├── pipeline.md
 │   ├── github-client.md
+│   ├── issues-pull-requests.md
 │   └── decisions/
 │       ├── ADR-001-use-postgresql.md
 │       ├── ADR-002-github-client.md
@@ -275,7 +329,7 @@ essas etapas forem implementadas.
 - [x] Fase 1: GitHub API Client — autenticação, paginação, timeout, rate limit e retries.
 - [x] Fase 2: repositories — API → Raw JSON → PostgreSQL.
 - [x] Fase 3: commits — paginação, incremental e idempotência; validação do MVP.
-- [ ] Fase 4: issues e pull requests.
+- [x] Fase 4: issues e pull requests.
 - [ ] Fase 5: ampliar qualidade, auditoria e recuperação de falhas.
 - [ ] Fase 6: dbt — staging, dimensões, fatos e testes.
 - [ ] Fase 7: dashboard Metabase; incluir contributors/languages antes dos KPIs dependentes.

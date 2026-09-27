@@ -1,10 +1,12 @@
 # Arquitetura do GitLog
 
-## Estado atual — Fase 3
+## Estado atual — Fase 4
 
 O pacote `ingestion` fornece ajuda, versão, migrações e ingestão via `argparse`.
 Ajuda e versão não abrem conexões; `repositories` executa a ingestão configurada.
 `commits` executa ingestão incremental com checkpoint persistido por repositório.
+`issues` e `pull-requests` compartilham o pipeline incremental por atualização,
+mantendo tabelas e checkpoints separados. `all` executa os quatro pipelines.
 O subpacote `ingestion.client` usa HTTPX para consultas GET explícitas ao GitHub,
 com sessão reutilizável, paginação, tratamento de erros e esperas limitadas.
 `rate_limit.py` interpreta os headers; `exceptions.py` define os erros públicos.
@@ -25,17 +27,17 @@ usuário `postgres`; não se força um UID que prejudique a inicialização.
 O healthcheck verifica disponibilidade do servidor, não migrações, permissões da
 aplicação ou completude de dados. O usuário de bootstrap é administrador local;
 `migrate` provisiona a role de ingestão com `USAGE` no schema `raw` e permissões
-de leitura, inserção e atualização nas tabelas de repositories, commits, checkpoints
+de leitura, inserção e atualização nas tabelas de repositories, commits, issues, PRs, checkpoints
 e auditoria.
 Migrações SQL empacotadas são aplicadas em transação, com lock e checksum.
 
 ## Evolução planejada
 
-1. **Ingestão Python:** ampliar os pipelines de repositories e commits para
+1. **Ingestão Python:** ampliar os pipelines de repositories, commits, issues e PRs para
    outras entidades, reutilizando cliente, validação e serviço de execução.
 2. **Raw Layer local:** ampliar os snapshots imutáveis particionados por entidade,
    repositório e data UTC de extração para as novas entidades.
-3. **PostgreSQL:** ampliar o schema `raw`, que já contém repositories, commits,
+3. **PostgreSQL:** ampliar o schema `raw`, que já contém repositories, commits, issues e PRs,
    checkpoints e auditoria. `staging` e `analytics` serão responsabilidade das transformações.
 4. **dbt:** limpeza, dimensões, fatos, documentação e testes de qualidade.
 5. **Metabase:** consumir a camada analítica com filtros e métricas reais.
@@ -44,7 +46,7 @@ Migrações SQL empacotadas são aplicadas em transação, com lock e checksum.
 7. **MinIO:** substituir o armazenamento raw local quando houver necessidade.
 8. **Spring Boot:** API opcional que consulta exclusivamente a camada analytics.
 
-Esses componentes futuros não são requisitos para executar a Fase 3.
+Esses componentes futuros não são requisitos para executar a Fase 4.
 
 ## Configuração e segurança
 

@@ -1,7 +1,8 @@
 # Modelo de dados
 
-**Estado: Fase 3.** A migração `001_repositories.sql` cria o schema `raw` com
-repositories e auditoria; `002_commits.sql` adiciona commits e checkpoints.
+**Estado: Fase 4.** A migração `001_repositories.sql` cria o schema `raw` com
+repositories e auditoria; `002_commits.sql` adiciona commits e checkpoints;
+`003_issues_pull_requests.sql` adiciona issues, PRs e seus checkpoints temporais.
 `public.gitlog_schema_migrations` registra nome,
 checksum SHA-256 e data de aplicação de cada migração.
 
@@ -82,6 +83,24 @@ inseridas ou alteradas; uma falha deixa zero registros carregados. Respostas de
 metadados e comparações que acionam fallback não entram nas contagens.
 `raw_path` aponta ao manifesto em sucesso e ao diretório dos documentos
 preservados em falha. Um repositório vazio retorna sucesso com zero e não cria checkpoint.
+
+## Issues, Pull Requests e checkpoints temporais
+
+`raw.issues`: `id`, `number`, `repository_id`, `title`, `state`, `author_login`,
+`created_at`, `updated_at`, `closed_at`, `comments_count`.
+
+`raw.pull_requests`: os mesmos campos, sem `comments_count`, mais `merged_at`,
+`merge_commit_sha` e `draft`. O ID vem do endpoint de PR, nunca da issue associada.
+
+Ambas possuem PK `id`, `UNIQUE (repository_id, number)` e FK para repositories,
+além de `ingested_at`, `raw_path` e `pipeline_run_id` para proveniência. Contagens
+são não negativas, IDs/números positivos e `state` é open/closed. PR merged
+exige estado closed. Autor, fechamento e campos de merge aceitam nulo.
+Há índices por repository ID e data de atualização.
+
+`raw.entity_checkpoints` armazena `repository_id`, `entity`, `watermark`,
+`updated_at` e `pipeline_run_id`; a PK composta separa Issues e PRs. Commits
+mantêm seu checkpoint por SHA na tabela original. [Fluxo e garantias](issues-pull-requests.md).
 
 ## Camadas posteriores
 

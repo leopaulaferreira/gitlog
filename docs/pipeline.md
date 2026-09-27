@@ -207,6 +207,18 @@ Ambas terminaram com `SUCCESS`. A ponta validada foi
 `data/validation/phase3-first-two-loads.json`; os dados raw e o relatório não são
 versionados. Esses números registram esse instante; novos commits ampliam o histórico.
 
+## Fase 4 — issues e pull requests
+
+`python -m ingestion.main issues`, `pull-requests` e `all` adicionam ingestão das
+duas entidades com raw por página, modelos próprios, UPSERT e checkpoints
+separados. PRs encontrados em `/issues` são excluídos da tabela de issues e
+hidratados em `/pulls/{number}` para preservar sua identidade correta.
+
+O comando `all` executa repositories, commits, issues e PRs, com transações e
+auditorias independentes. A migração 003 preserva os dados das fases anteriores.
+Veja [Issues e Pull Requests](issues-pull-requests.md) para os campos, incremental,
+semântica das métricas, testes e limites de reconciliação.
+
 ## Contrato do MVP
 
 1. Ler e validar configuração e repositórios.
