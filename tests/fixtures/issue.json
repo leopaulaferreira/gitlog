@@ -1,0 +1,13 @@
+{
+  "id": 1001,
+  "number": 1,
+  "title": "Issue fixture only",
+  "state": "open",
+  "user": {"login": "octocat"},
+  "created_at": "2026-09-01T10:00:00Z",
+  "updated_at": "2026-09-27T12:00:00Z",
+  "closed_at": null,
+  "comments": 3,
+  "body": "Preserved raw, never included in operational logs",
+  "future_field": {"keep": true}
+}

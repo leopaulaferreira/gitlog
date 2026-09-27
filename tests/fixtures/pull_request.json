@@ -1,0 +1,15 @@
+{
+  "id": 9002,
+  "number": 2,
+  "title": "Pull request fixture only",
+  "state": "open",
+  "user": {"login": "octocat"},
+  "created_at": "2026-09-02T10:00:00Z",
+  "updated_at": "2026-09-27T12:00:00Z",
+  "closed_at": null,
+  "merged_at": null,
+  "merge_commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "draft": false,
+  "body": "A non-null merge_commit_sha alone does not mean merged",
+  "future_field": {"keep": true}
+}

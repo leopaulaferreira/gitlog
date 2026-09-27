@@ -49,3 +49,31 @@ def commit_payload() -> dict:
     return json.loads(
         (Path(__file__).parent / "fixtures" / "commit.json").read_text(encoding="utf-8")
     )
+
+
+@pytest.fixture
+def issue_payload() -> dict:
+    return json.loads(
+        (Path(__file__).parent / "fixtures" / "issue.json").read_text(encoding="utf-8")
+    )
+
+
+@pytest.fixture
+def pull_request_payload() -> dict:
+    return json.loads(
+        (Path(__file__).parent / "fixtures" / "pull_request.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+
+@pytest.fixture
+def pull_request_issue_payload(issue_payload: dict) -> dict:
+    return {
+        **issue_payload,
+        "id": 1002,
+        "number": 2,
+        "pull_request": {
+            "url": "https://api.github.com/repos/octocat/Hello-World/pulls/2"
+        },
+    }
