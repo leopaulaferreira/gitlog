@@ -1,1 +1,1 @@
-"""GitLog ingestion package; pipeline implementation starts in later phases."""
+"""GitLog ingestion package: GitHub client available, pipeline planned next."""

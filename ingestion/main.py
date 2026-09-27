@@ -1,4 +1,4 @@
-"""Minimal bootstrap CLI, with no network or database side effects."""
+"""Project CLI; network access is explicit through GitHubClient in Phase 1."""
 
 import argparse
 from importlib.metadata import version
@@ -9,7 +9,7 @@ def main() -> None:
         prog="gitlog",
         description=(
             "GitLog — Turning GitHub activity into structured data and "
-            "actionable insights. Phase 0: ingestion is not implemented yet."
+            "actionable insights. Phase 1: ingestion is not implemented yet."
         ),
     )
     parser.add_argument("--version", action="version", version=version("gitlog"))
