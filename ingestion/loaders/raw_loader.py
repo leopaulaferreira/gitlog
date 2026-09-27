@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,8 +31,39 @@ class RawLoader:
             / f"month={instant:%m}"
             / f"day={instant:%d}"
         )
-        directory.mkdir(parents=True, exist_ok=True)
         destination = directory / f"{run_id}.json"
+        return self._publish(destination, payload)
+
+    def save_commit_document(
+        self,
+        repository: str,
+        run_id: UUID,
+        document: str,
+        payload: Payload,
+        extracted_at: datetime,
+    ) -> Path:
+        validate_repository_name(repository)
+        if extracted_at.tzinfo is None:
+            raise ValueError("Extraction time must be timezone aware.")
+        if not re.fullmatch(r"repository|reference|manifest|page-[0-9]+", document):
+            raise ValueError("Invalid commit snapshot document.")
+        instant = extracted_at.astimezone(UTC)
+        destination = (
+            self.root.resolve()
+            / "commits"
+            / f"repository={repository.lower().replace('/', '_')}"
+            / f"year={instant:%Y}"
+            / f"month={instant:%m}"
+            / f"day={instant:%d}"
+            / str(run_id)
+            / f"{document}.json"
+        )
+        return self._publish(destination, payload)
+
+    @staticmethod
+    def _publish(destination: Path, payload: Payload) -> Path:
+        directory = destination.parent
+        directory.mkdir(parents=True, exist_ok=True)
         # Link an fsynced temporary file atomically without replacing old snapshots.
         fd, temporary = tempfile.mkstemp(
             dir=directory, prefix=".snapshot-", suffix=".tmp"

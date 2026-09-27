@@ -127,6 +127,28 @@ class GitHubClient:
         a later page fails; callers must not interpret a failed iterator as complete.
         ``per_page`` overrides any value in params on the first page only.
         """
+        for payload in self.get_pages(
+            path, params=params, per_page=per_page, max_pages=max_pages
+        ):
+            if not isinstance(payload, list) or any(
+                not isinstance(item, dict) for item in payload
+            ):
+                raise GitHubPaginationError("Expected a JSON array of objects.")
+            yield from payload
+
+    def get_pages(
+        self,
+        path: str,
+        *,
+        params: QueryParams | None = None,
+        per_page: int = 100,
+        max_pages: int = 10_000,
+    ) -> Iterator[Payload]:
+        """Yield original JSON pages, including object envelopes such as compare.
+
+        Follow Link rel=next with the same origin, cycle and retry guarantees as
+        get_paginated. Consumers must exhaust the iterator before checkpointing.
+        """
         if type(per_page) is not int or not 1 <= per_page <= 100:
             raise GitHubConfigurationError("per_page must be between 1 and 100.")
         if type(max_pages) is not int or max_pages < 1:
@@ -143,12 +165,7 @@ class GitHubClient:
             if response.url != url and response.url in visited:
                 raise GitHubPaginationError("GitHub pagination contains a cycle.")
             visited.add(response.url)
-            payload = self._decode(response)
-            if not isinstance(payload, list) or any(
-                not isinstance(item, dict) for item in payload
-            ):
-                raise GitHubPaginationError("Expected a JSON array of objects.")
-            yield from payload
+            yield self._decode(response)
             next_link = response.links.get("next")
             if next_link is None:
                 return
