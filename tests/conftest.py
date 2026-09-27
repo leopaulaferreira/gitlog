@@ -42,3 +42,10 @@ def repository_payload() -> dict:
             encoding="utf-8"
         )
     )
+
+
+@pytest.fixture
+def commit_payload() -> dict:
+    return json.loads(
+        (Path(__file__).parent / "fixtures" / "commit.json").read_text(encoding="utf-8")
+    )
