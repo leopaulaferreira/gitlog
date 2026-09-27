@@ -41,14 +41,14 @@ def test_installed_console_script_reports_version(tmp_path: Path) -> None:
 
 def test_unimplemented_command_fails_clearly(tmp_path: Path) -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "ingestion.main", "commits"],
+        [sys.executable, "-m", "ingestion.main", "issues"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
         check=False,
     )
     assert result.returncode == 2
-    assert "invalid choice: 'commits'" in result.stderr
+    assert "invalid choice: 'issues'" in result.stderr
 
 
 def test_sql_migration_is_available_outside_checkout(tmp_path: Path) -> None:

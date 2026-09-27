@@ -2,7 +2,7 @@ PYTHON ?= python3
 VENV := .venv
 BIN := $(VENV)/bin
 
-.PHONY: setup test test-integration lint format format-check check run migrate up down compose-check
+.PHONY: setup test test-integration lint format format-check check run commits migrate up down compose-check
 
 setup:
 	$(PYTHON) -m venv $(VENV)
@@ -28,6 +28,9 @@ check: lint format-check test
 
 run:
 	$(BIN)/python -m ingestion.main repositories
+
+commits:
+	$(BIN)/python -m ingestion.main commits
 
 migrate:
 	$(BIN)/python -m ingestion.main migrate
