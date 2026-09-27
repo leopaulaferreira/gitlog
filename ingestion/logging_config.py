@@ -15,6 +15,7 @@ class JsonFormatter(logging.Formatter):
         }
         for key in (
             "repository",
+            "entity",
             "run_id",
             "records",
             "records_extracted",
