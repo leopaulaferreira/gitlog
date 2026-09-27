@@ -77,6 +77,18 @@ class CommitService:
                         for page_mode, page in self.extractor.pages(
                             repository.full_name, head, base
                         ):
+                            received = page
+                            if page_mode == "compare":
+                                received = (
+                                    page.get("commits")
+                                    if isinstance(page, dict)
+                                    and page.get("status") == "ahead"
+                                    else None
+                                )
+                            # Count received records even if preserving this page
+                            # fails. Domain validation still follows raw storage.
+                            if isinstance(received, list):
+                                extracted += len(received)
                             path = self.raw.save_commit_document(
                                 name,
                                 run_id,
@@ -86,7 +98,6 @@ class CommitService:
                             )
                             pages.append((page_mode, path))
                             items = page_commits(page_mode, page)
-                            extracted += len(items)
                             for item in items:
                                 seen.add(Commit.model_validate(item).sha)
                             if page_mode == "compare" and page["status"] == "ahead":

@@ -10,6 +10,7 @@ import psycopg
 import pytest
 
 from ingestion.client import GitHubClient
+from ingestion.client.exceptions import GitHubNotFoundError
 from ingestion.extractors.commits import CommitExtractor
 from ingestion.loaders.commit_loader import CommitLoader, ConcurrentCommitRunError
 from ingestion.loaders.raw_loader import RawLoader
@@ -93,6 +94,7 @@ def pipeline(writer, repository_payload, commit_payload, tmp_path):
             RawLoader(tmp_path),
             CommitLoader(writer),
         )
+        state.handler = handler
         yield service, state
 
 
@@ -333,11 +335,11 @@ def test_commits_cli_runs_twice(
     monkeypatch.setattr(logger, "handlers", [])
     monkeypatch.setattr(logger, "level", logging.NOTSET)
     monkeypatch.setattr(logger, "propagate", True)
-    # Fresh clients share the fixture's MockTransport, preserving the CLI's real
+    # Fresh clients use the fixture's HTTP handler, preserving the CLI's real
     # configuration, database connection, extraction and loading paths.
-    transport = service.extractor.client._http._transport
     monkeypatch.setattr(
-        "ingestion.main.GitHubClient", lambda: GitHubClient(transport=transport)
+        "ingestion.main.GitHubClient",
+        lambda: GitHubClient(transport=httpx.MockTransport(state.handler)),
     )
     monkeypatch.setattr("sys.argv", ["gitlog", "commits", "--per-page", "1"])
     assert main() == 0
@@ -349,3 +351,63 @@ def test_commits_cli_runs_twice(
     events = [json.loads(line) for line in output.splitlines()]
     completed = [e for e in events if e["event"] == "commits.completed"]
     assert completed[-1]["records_loaded"] == 0
+
+
+def test_large_comparison_loads_more_than_250_commits(pipeline, writer):
+    service, state = pipeline
+    assert service.run((NAME,)) == 0
+    state.delta = [
+        {**deepcopy(state.history[0]), "sha": f"{number:040x}"}
+        for number in range(1, 252)
+    ]
+    state.head = state.delta[-1]["sha"]
+    service.extractor.per_page = 100
+    assert service.run((NAME,)) == 0
+    assert count(writer) == 252
+    assert rows(writer)[-1] == ("SUCCESS", 251, 251)
+    assert len([r for r in state.requests if "/compare/" in r.url.path]) == 3
+
+
+def test_raw_failure_prevents_commit_load_and_checkpoint(pipeline, writer, monkeypatch):
+    service, state = pipeline
+    assert service.run((NAME,)) == 0
+    state.head = "b" * 40
+    state.delta = [{**deepcopy(state.history[0]), "sha": state.head}]
+    save = service.raw.save_commit_document
+
+    def fail_page(name, run_id, document, payload, instant):
+        if document.startswith("page-"):
+            raise OSError("disk full")
+        return save(name, run_id, document, payload, instant)
+
+    monkeypatch.setattr(service.raw, "save_commit_document", fail_page)
+    assert service.run((NAME,)) == 1
+    assert checkpoint(writer) == "a" * 40
+    assert count(writer) == 1
+    assert rows(writer)[-1] == ("FAILED", 1, 0)
+
+
+def test_failed_repository_does_not_block_next_one(pipeline, writer, monkeypatch):
+    service, state = pipeline
+    extract = service.extractor.repository
+
+    def repository(name):
+        if name == "octocat/missing":
+            raise GitHubNotFoundError(404)
+        return extract(name)
+
+    monkeypatch.setattr(service.extractor, "repository", repository)
+    assert service.run(("octocat/missing", NAME)) == 1
+    assert rows(writer) == [("FAILED", 0, 0), ("SUCCESS", 1, 1)]
+
+
+def test_audit_start_failure_prevents_api_calls(pipeline, monkeypatch):
+    service, state = pipeline
+
+    def fail(*args, **kwargs):
+        raise OSError("unavailable")
+
+    monkeypatch.setattr(service.postgres, "start_run", fail)
+    with pytest.raises(OSError):
+        service.run((NAME,))
+    assert state.requests == []
