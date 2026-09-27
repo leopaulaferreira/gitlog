@@ -1,7 +1,8 @@
 # Modelo de dados
 
-**Estado: Fase 2.** A migração `001_repositories.sql` cria o schema `raw` com
-repositories e auditoria. `public.gitlog_schema_migrations` registra nome,
+**Estado: Fase 3.** A migração `001_repositories.sql` cria o schema `raw` com
+repositories e auditoria; `002_commits.sql` adiciona commits e checkpoints.
+`public.gitlog_schema_migrations` registra nome,
 checksum SHA-256 e data de aplicação de cada migração.
 
 ## Entidades do MVP
@@ -9,8 +10,8 @@ checksum SHA-256 e data de aplicação de cada migração.
 | Entidade | Identidade | Estratégia |
 | --- | --- | --- |
 | Repository | ID do GitHub | UPSERT dos atributos atuais |
-| Commit (Fase 3) | Repository ID + SHA | UPSERT sem duplicar commits compartilhados por repositórios |
-| Ingestion checkpoint (Fase 3) | Source + entity + repository | Avançar após persistência bem-sucedida |
+| Commit | Repository ID + SHA | UPSERT sem duplicar commits dentro do repositório |
+| Ingestion checkpoint de commits | Repository ID | Branch + SHA da última ponta carregada com sucesso |
 | Pipeline run | ID da execução | Rastrear início, fim, status, contagens e erro sanitizado |
 
 ## `raw.repositories`
@@ -49,6 +50,38 @@ faz rollback e depois registra `FAILED`; se o banco ficar indisponível, a execu
 pode permanecer `RUNNING`. Arquivos já publicados permanecem disponíveis após
 falhas de validação ou SQL. Caminhos relativos são resolvidos a partir do diretório
 de execução; configure `GITLOG_RAW_DIR` absoluto quando precisar de referência estável.
+
+## `raw.commits`
+
+Chave primária composta `(repository_id, sha)` com FK para `raw.repositories`.
+O mesmo SHA em dois repositórios representa duas linhas distintas. Armazena
+mensagem completa, nomes/emails/datas de autor e committer, logins GitHub opcionais
+e lista de SHAs dos pais. Identidades Git e contas GitHub podem estar ausentes;
+esses campos aceitam nulo. Mensagens vazias são válidas.
+
+`ingested_at`, `raw_path` e `pipeline_run_id` apontam para a carga e página JSON
+originais. O UPSERT só atualiza quando algum campo da origem mudou; uma releitura
+idêntica preserva a proveniência. Índice por repository ID e data do committer
+suporta consultas temporais. Estatísticas de arquivos e linhas não são coletadas.
+
+## `raw.ingestion_checkpoints`
+
+Uma linha por repository ID para o pipeline de commits da branch padrão:
+`branch`, `head_sha`, `updated_at`, `pipeline_run_id`. O checkpoint não usa datas
+de autoria ou de commit. Renomear o repositório mantém a identidade; mudar a
+branch padrão inicia reconciliação completa e atualiza a mesma linha.
+
+O serviço mantém um advisory lock de sessão por repository ID desde a leitura
+do checkpoint até a conclusão. Outra execução concorrente falha sem sobrescrever
+o estado. O PostgreSQL libera o lock quando a sessão termina. Commits, metadados
+do repositório, checkpoint e auditoria de sucesso usam uma única transação.
+
+Em auditorias `commit_ingestion`, `records_extracted` conta os itens recebidos nas
+páginas de dados, incluindo repetições. `records_loaded` conta chaves distintas
+inseridas ou alteradas; uma falha deixa zero registros carregados. Respostas de
+metadados e comparações que acionam fallback não entram nas contagens.
+`raw_path` aponta ao manifesto em sucesso e ao diretório dos documentos
+preservados em falha. Um repositório vazio retorna sucesso com zero e não cria checkpoint.
 
 ## Camadas posteriores
 
