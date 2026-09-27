@@ -2,7 +2,7 @@ PYTHON ?= python3
 VENV := .venv
 BIN := $(VENV)/bin
 
-.PHONY: setup test lint format format-check check run up down compose-check
+.PHONY: setup test test-integration lint format format-check check run migrate up down compose-check
 
 setup:
 	$(PYTHON) -m venv $(VENV)
@@ -10,6 +10,9 @@ setup:
 
 test:
 	$(BIN)/python -m pytest
+
+test-integration:
+	$(BIN)/python scripts/test_integration.py
 
 lint:
 	$(BIN)/ruff check .
@@ -23,9 +26,11 @@ format-check:
 
 check: lint format-check test
 
-# Show available project commands; ingestion arrives in Phase 2.
 run:
-	$(BIN)/python -m ingestion.main
+	$(BIN)/python -m ingestion.main repositories
+
+migrate:
+	$(BIN)/python -m ingestion.main migrate
 
 up:
 	docker compose up -d --wait
