@@ -34,7 +34,8 @@ def admin(database_settings: DatabaseSettings) -> Iterator[psycopg.Connection]:
         **database_settings.connection_kwargs(admin=True), autocommit=True
     ) as connection:
         connection.execute(
-            "TRUNCATE raw.commits, raw.ingestion_checkpoints, "
+            "TRUNCATE raw.issues, raw.pull_requests, raw.entity_checkpoints, "
+            "raw.commits, raw.ingestion_checkpoints, "
             "raw.repositories, raw.pipeline_runs"
         )
         yield connection

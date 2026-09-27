@@ -210,7 +210,7 @@ def test_migrations_are_repeatable_and_checksum_verified(
         admin.execute(
             "SELECT count(*) FROM public.gitlog_schema_migrations"
         ).fetchone()[0]
-        == 2
+        == 3
     )
     with pytest.raises(MigrationError, match="modified"):
         with admin.transaction():
