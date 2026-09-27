@@ -22,6 +22,9 @@ def test_module_displays_bootstrap_help(args: list[str], tmp_path: Path) -> None
     assert "repository ingestion" in result.stdout
     assert "repositories" in result.stdout
     assert "migrate" in result.stdout
+    assert "issues" in result.stdout
+    assert "pull-requests" in result.stdout
+    assert "all" in result.stdout
     assert "--version" in result.stdout
     assert result.stderr == ""
 
@@ -41,14 +44,14 @@ def test_installed_console_script_reports_version(tmp_path: Path) -> None:
 
 def test_unimplemented_command_fails_clearly(tmp_path: Path) -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "ingestion.main", "issues"],
+        [sys.executable, "-m", "ingestion.main", "contributors"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
         check=False,
     )
     assert result.returncode == 2
-    assert "invalid choice: 'issues'" in result.stderr
+    assert "invalid choice: 'contributors'" in result.stderr
 
 
 def test_sql_migration_is_available_outside_checkout(tmp_path: Path) -> None:
