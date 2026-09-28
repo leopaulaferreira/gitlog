@@ -1,4 +1,4 @@
-select activity_date, sum(issues_opened) as opened, sum(issues_closed) as closed
+select activity_date as "Data", sum(issues_opened) as "Abertas", sum(issues_closed) as "Fechadas"
 from analytics.fact_repository_daily_metrics join analytics.dim_repository using (repository_key)
 
 where 1=1

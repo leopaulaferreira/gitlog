@@ -46,6 +46,7 @@ services:
       MB_DB_USER: metabase
       MB_DB_PASS: ${METABASE_DB_PASSWORD:?Set METABASE_DB_PASSWORD in .env}
       MB_ANON_TRACKING_ENABLED: "false"
+      MB_SITE_LOCALE: pt_BR
       MB_REPORT_TIMEZONE: UTC
       JAVA_TIMEZONE: UTC
       JAVA_OPTS: -Xmx1g

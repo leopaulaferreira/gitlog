@@ -1,4 +1,4 @@
-select activity_date, sum(prs_opened) as opened, sum(prs_merged) as merged
+select activity_date as "Data", sum(prs_opened) as "Abertas", sum(prs_merged) as "Mescladas"
 from analytics.fact_repository_daily_metrics join analytics.dim_repository using (repository_key)
 
 where 1=1

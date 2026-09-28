@@ -1,9 +1,9 @@
 [
   {
     "key": "repositories",
-    "name": "Repositories Monitored",
+    "name": "Repositórios monitorados",
     "display": "scalar",
-    "description": "Current repositories with ingested metadata. Date range does not apply to this snapshot KPI.",
+    "description": "Repositórios com metadados coletados. O filtro de período não se aplica a este indicador do estado atual.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -14,13 +14,14 @@
         "primary_language"
       ]
     },
-    "visualization_settings": {}
+    "visualization_settings": {},
+    "legacy_name": "Repositories Monitored"
   },
   {
     "key": "commits",
-    "name": "Commits Collected",
+    "name": "Commits coletados",
     "display": "scalar",
-    "description": "Collected rows. Date filter applies to commit_date in UTC. No contributors are inferred.",
+    "description": "Commits coletados. O período considera a data do commit em UTC; sem filtro, inclui commits sem data.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -35,13 +36,14 @@
         "commit_date"
       ]
     },
-    "visualization_settings": {}
+    "visualization_settings": {},
+    "legacy_name": "Commits Collected"
   },
   {
     "key": "pull_requests",
-    "name": "Pull Requests",
+    "name": "Solicitações de alteração",
     "display": "scalar",
-    "description": "Collected rows. Date filter applies to created_date in UTC. No contributors are inferred.",
+    "description": "Solicitações de alteração (PRs) coletadas. O período considera a data de criação em UTC.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -56,13 +58,14 @@
         "created_date"
       ]
     },
-    "visualization_settings": {}
+    "visualization_settings": {},
+    "legacy_name": "Pull Requests"
   },
   {
     "key": "issues",
-    "name": "Issues",
+    "name": "Questões registradas",
     "display": "scalar",
-    "description": "Collected rows. Date filter applies to created_date in UTC. No contributors are inferred.",
+    "description": "Questões (issues) coletadas. O período considera a data de criação em UTC.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -77,13 +80,14 @@
         "created_date"
       ]
     },
-    "visualization_settings": {}
+    "visualization_settings": {},
+    "legacy_name": "Issues"
   },
   {
     "key": "merged_prs",
-    "name": "Merged Pull Requests",
+    "name": "Solicitações mescladas",
     "display": "scalar",
-    "description": "Collected rows. Date filter applies to merged_date in UTC. No contributors are inferred.",
+    "description": "Solicitações de alteração efetivamente mescladas. O período considera a data da mesclagem em UTC.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -98,13 +102,14 @@
         "merged_date"
       ]
     },
-    "visualization_settings": {}
+    "visualization_settings": {},
+    "legacy_name": "Merged Pull Requests"
   },
   {
     "key": "closed_issues",
-    "name": "Closed Issues",
+    "name": "Questões fechadas",
     "display": "scalar",
-    "description": "Collected rows. Date filter applies to closed_date in UTC. No contributors are inferred.",
+    "description": "Questões atualmente fechadas. O período considera a última data de fechamento disponível, em UTC.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -119,13 +124,14 @@
         "closed_date"
       ]
     },
-    "visualization_settings": {}
+    "visualization_settings": {},
+    "legacy_name": "Closed Issues"
   },
   {
     "key": "commits_over_time",
-    "name": "Commits over time",
+    "name": "Commits ao longo do tempo",
     "display": "line",
-    "description": "Dated collected commits per UTC day. Undated commits remain in the fact and all-time KPI.",
+    "description": "Commits com data por dia UTC. Commits sem data permanecem no fato e no indicador sem filtro de período.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -142,18 +148,19 @@
     },
     "visualization_settings": {
       "graph.dimensions": [
-        "activity_date"
+        "Data"
       ],
       "graph.metrics": [
-        "commits"
+        "Commits"
       ]
-    }
+    },
+    "legacy_name": "Commits over time"
   },
   {
     "key": "pull_requests_over_time",
-    "name": "Pull Requests — Opened vs Merged",
+    "name": "Solicitações de alteração — Abertas e mescladas",
     "display": "line",
-    "description": "Events on their creation or merge date, not cohorts of PRs created together.",
+    "description": "Eventos nas respectivas datas de criação e mesclagem. As séries não representam o mesmo grupo de solicitações.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -170,19 +177,20 @@
     },
     "visualization_settings": {
       "graph.dimensions": [
-        "activity_date"
+        "Data"
       ],
       "graph.metrics": [
-        "opened",
-        "merged"
+        "Abertas",
+        "Mescladas"
       ]
-    }
+    },
+    "legacy_name": "Pull Requests — Opened vs Merged"
   },
   {
     "key": "issues_over_time",
-    "name": "Issues — Opened vs Closed",
+    "name": "Questões — Abertas e fechadas",
     "display": "line",
-    "description": "Creations and latest closure of currently closed issues; reopen history is unavailable.",
+    "description": "Criações e último fechamento disponível das questões atualmente fechadas. O histórico de reaberturas não está disponível.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -199,19 +207,20 @@
     },
     "visualization_settings": {
       "graph.dimensions": [
-        "activity_date"
+        "Data"
       ],
       "graph.metrics": [
-        "opened",
-        "closed"
+        "Abertas",
+        "Fechadas"
       ]
-    }
+    },
+    "legacy_name": "Issues — Opened vs Closed"
   },
   {
     "key": "active_repositories",
-    "name": "Most Active Repositories — Commits",
+    "name": "Repositórios mais ativos — Commits",
     "display": "bar",
-    "description": "Ranking by collected commit count. This is not an Activity Score.",
+    "description": "Classificação pela quantidade de commits coletados, sem pontuação composta de atividade.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -228,18 +237,19 @@
     },
     "visualization_settings": {
       "graph.dimensions": [
-        "full_name"
+        "Repositório"
       ],
       "graph.metrics": [
-        "commits"
+        "Commits"
       ]
-    }
+    },
+    "legacy_name": "Most Active Repositories — Commits"
   },
   {
     "key": "merge_time",
-    "name": "Pull Request Merge Time — Hours",
+    "name": "Tempo até a mesclagem — Horas",
     "display": "bar",
-    "description": "Weighted average elapsed creation-to-merge hours, for merges in the selected period. No merges means no average.",
+    "description": "Média ponderada das horas corridas entre criação e mesclagem, para solicitações mescladas no período. Sem mesclagens, a média não existe.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -256,18 +266,19 @@
     },
     "visualization_settings": {
       "graph.dimensions": [
-        "full_name"
+        "Repositório"
       ],
       "graph.metrics": [
-        "average_pr_merge_time_hours"
+        "Tempo médio até a mesclagem (horas)"
       ]
-    }
+    },
+    "legacy_name": "Pull Request Merge Time — Hours"
   },
   {
     "key": "repository_activity",
-    "name": "Repository Activity Over Time — Commits",
+    "name": "Atividade dos repositórios ao longo do tempo",
     "display": "line",
-    "description": "One series per repository, measured in collected commits, using UTC dates.",
+    "description": "Uma série por repositório, medida em commits coletados e agrupada por data UTC.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -284,19 +295,20 @@
     },
     "visualization_settings": {
       "graph.dimensions": [
-        "activity_date",
-        "full_name"
+        "Data",
+        "Repositório"
       ],
       "graph.metrics": [
-        "commits"
+        "Commits"
       ]
-    }
+    },
+    "legacy_name": "Repository Activity Over Time — Commits"
   },
   {
     "key": "primary_languages",
-    "name": "Primary Languages — Current Snapshot",
+    "name": "Linguagens principais — Estado atual",
     "display": "pie",
-    "description": "Repository count by current primary language. Unknown is missing metadata; this is not language history or code volume.",
+    "description": "Quantidade de repositórios por linguagem principal atual. Linguagem não informada indica metadado ausente; não representa histórico nem volume de código.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -308,15 +320,16 @@
       ]
     },
     "visualization_settings": {
-      "pie.dimension": "primary_language",
-      "pie.metric": "repositories"
-    }
+      "pie.dimension": "Linguagem principal",
+      "pie.metric": "Repositórios"
+    },
+    "legacy_name": "Primary Languages — Current Snapshot"
   },
   {
     "key": "repository_comparison",
-    "name": "Repository comparison",
+    "name": "Comparação entre repositórios",
     "display": "table",
-    "description": "Compare separate counts and weighted merge time; prs_closed includes merged PRs.",
+    "description": "Comparação de contagens separadas e média ponderada de horas até a mesclagem. Solicitações fechadas incluem as mescladas.",
     "filters": {
       "repository": [
         "dim_repository",
@@ -331,6 +344,7 @@
         "activity_date"
       ]
     },
-    "visualization_settings": {}
+    "visualization_settings": {},
+    "legacy_name": "Repository comparison"
   }
 ]

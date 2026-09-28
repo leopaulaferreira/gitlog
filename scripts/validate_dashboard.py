@@ -139,11 +139,9 @@ def validate():
     output = Path("data/validation/phase7-dashboard-validation.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2))
-    print(
-        f"Validated {len(cards)} cards and filters. BI access restricted to analytics."
-    )
+    print(f"Validados {len(cards)} cartões e filtros. Acesso BI restrito a analytics.")
     slowest = max(row["execution_ms"] for row in report["query_plans"])
-    print(f"Slowest local query: {slowest:.3f} ms.")
+    print(f"Consulta local mais lenta: {slowest:.3f} ms.")
     return 0
 
 

@@ -1,4 +1,4 @@
-select count(*) as total from analytics.fact_commits
+select count(*) as "Total" from analytics.fact_commits
 join analytics.dim_repository using (repository_key)
 
 where 1=1

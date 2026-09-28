@@ -10,25 +10,28 @@ import httpx
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
-MANAGED = "Managed by GitLog: dashboard/cards.json."
-NAME = "GitLog Analytics"
+TRANSLATIONS = json.loads((ROOT / "dashboard/pt_br.json").read_text())
+LEGACY_MANAGED = "Managed by GitLog: dashboard/cards.json."
+MANAGED = TRANSLATIONS["managed"]
+NAME = TRANSLATIONS["name"]
+LEGACY_NAME = TRANSLATIONS["legacy_name"]
 PARAMETERS = [
     {
         "id": "repository",
-        "name": "Repository",
+        "name": TRANSLATIONS["filters"]["repository"],
         "slug": "repository",
         "type": "string/=",
         "isMultiSelect": True,
     },
     {
         "id": "date_range",
-        "name": "Date range (UTC)",
+        "name": TRANSLATIONS["filters"]["date_range"],
         "slug": "date",
         "type": "date/all-options",
     },
     {
         "id": "language",
-        "name": "Current language",
+        "name": TRANSLATIONS["filters"]["language"],
         "slug": "language",
         "type": "string/=",
         "isMultiSelect": True,
@@ -48,15 +51,15 @@ def items(result):
     return result.get("data", []) if isinstance(result, dict) else result
 
 
-def find_named(rows, name):
-    found = [row for row in rows if row["name"] == name]
+def find_named(rows, name, *aliases):
+    found = [row for row in rows if row["name"] in (name, *aliases)]
     if len(found) > 1:
         raise ValueError(f"Ambiguous Metabase object: {name}")
     return found[0] if found else None
 
 
 def require_managed(row):
-    if row and not (row.get("description") or "").startswith(MANAGED):
+    if row and not (row.get("description") or "").startswith((MANAGED, LEGACY_MANAGED)):
         raise ValueError("Existing collection/dashboard is not managed by GitLog.")
 
 
@@ -75,7 +78,7 @@ def setup(client, email, password):
                     "first_name": "GitLog",
                     "last_name": "Admin",
                 },
-                "prefs": {"site_name": NAME, "site_locale": "en"},
+                "prefs": {"site_name": NAME, "site_locale": TRANSLATIONS["locale"]},
             },
         )
     session = api(
@@ -84,8 +87,55 @@ def setup(client, email, password):
     client.headers["X-Metabase-Session"] = session["id"]
 
 
+def configure_localization(client):
+    properties = api(client, "GET", "/api/session/properties")
+    if properties.get("site-locale") != TRANSLATIONS["locale"]:
+        api(
+            client, "PUT", "/api/setting/site-locale", {"value": TRANSLATIONS["locale"]}
+        )
+    api(client, "PUT", "/api/setting/site-name", {"value": NAME})
+    user = api(client, "GET", "/api/user/current")
+    if user.get("locale") != TRANSLATIONS["locale"]:
+        api(
+            client, "PUT", f"/api/user/{user['id']}", {"locale": TRANSLATIONS["locale"]}
+        )
+
+
+def localize_metadata(client, metadata):
+    for table in metadata["tables"]:
+        if (
+            table["schema"] != "analytics"
+            or table["name"] not in TRANSLATIONS["tables"]
+        ):
+            continue
+        translated = TRANSLATIONS["tables"][table["name"]]
+        api(
+            client,
+            "PUT",
+            f"/api/table/{table['id']}",
+            {
+                "display_name": translated["name"],
+                "description": translated["description"],
+            },
+        )
+        for field in table["fields"]:
+            label = TRANSLATIONS["fields"].get(field["name"])
+            if label:
+                api(
+                    client,
+                    "PUT",
+                    f"/api/field/{field['id']}",
+                    {
+                        "display_name": label,
+                        "description": TRANSLATIONS["field_descriptions"].get(
+                            field["name"], label + "."
+                        ),
+                    },
+                )
+
+
 def provision_dashboard(client, database_details):
-    database = find_named(items(api(client, "GET", "/api/database")), NAME)
+    database = find_named(items(api(client, "GET", "/api/database")), NAME, LEGACY_NAME)
     if database:
         for field in ("host", "dbname", "user"):
             if database["details"].get(field) != database_details[field]:
@@ -106,6 +156,8 @@ def provision_dashboard(client, database_details):
             },
         )
     database_id = database["id"]
+    if database["name"] != NAME:
+        api(client, "PUT", f"/api/database/{database_id}", {"name": NAME})
     api(client, "POST", f"/api/database/{database_id}/sync_schema")
     definitions = json.loads((ROOT / "dashboard/cards.json").read_text())
     needed = {
@@ -127,16 +179,25 @@ def provision_dashboard(client, database_details):
         raise RuntimeError(
             "Analytics fields unavailable after sync. Run dbt run/test first."
         )
-    collection = find_named(items(api(client, "GET", "/api/collection")), NAME)
+    collection = find_named(
+        items(api(client, "GET", "/api/collection")), NAME, LEGACY_NAME
+    )
     require_managed(collection)
     if collection is None:
         collection = api(
             client, "POST", "/api/collection", {"name": NAME, "description": MANAGED}
         )
     collection_id = collection["id"]
+    api(
+        client,
+        "PUT",
+        f"/api/collection/{collection_id}",
+        {"name": NAME, "description": MANAGED},
+    )
+    localize_metadata(client, metadata)
     contents = items(api(client, "GET", f"/api/collection/{collection_id}/items"))
     dashboard = find_named(
-        [row for row in contents if row["model"] == "dashboard"], NAME
+        [row for row in contents if row["model"] == "dashboard"], NAME, LEGACY_NAME
     )
     if dashboard:
         dashboard = api(client, "GET", f"/api/dashboard/{dashboard['id']}")
@@ -144,8 +205,8 @@ def provision_dashboard(client, database_details):
     dashboard_payload = {
         "name": NAME,
         "collection_id": collection_id,
-        "description": MANAGED
-        + " UTC events; current repository metadata. No synthetic history.",
+        "description": MANAGED + " Eventos em UTC e metadados atuais dos repositórios. "
+        "Sem histórico artificial.",
         "parameters": PARAMETERS,
     }
     if dashboard:
@@ -162,7 +223,7 @@ def provision_dashboard(client, database_details):
             tags[name] = {
                 "id": str(uuid5(NAMESPACE_URL, definition["key"] + "/" + name)),
                 "name": name,
-                "display-name": name.replace("_", " ").title(),
+                "display-name": TRANSLATIONS["filters"][name],
                 "type": "dimension",
                 "dimension": ["field", fields[tuple(field)], None],
                 "widget-type": (
@@ -189,7 +250,9 @@ def provision_dashboard(client, database_details):
             "visualization_settings": definition["visualization_settings"],
         }
         existing = find_named(
-            [row for row in contents if row["model"] == "card"], definition["name"]
+            [row for row in contents if row["model"] == "card"],
+            definition["name"],
+            definition["legacy_name"],
         )
         if existing:
             require_managed(api(client, "GET", f"/api/card/{existing['id']}"))
@@ -249,8 +312,11 @@ def main():
         }
         with httpx.Client(base_url=base_url, timeout=120, trust_env=False) as client:
             setup(client, email, password)
+            configure_localization(client)
             dashboard_id, count = provision_dashboard(client, details)
-        print(f"{NAME}: {base_url}/dashboard/{dashboard_id} ({count} cards validated)")
+        print(
+            f"{NAME}: {base_url}/dashboard/{dashboard_id} ({count} cartões validados)"
+        )
         return 0
     except (httpx.HTTPError, RuntimeError, ValueError) as error:
         print(

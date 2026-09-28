@@ -45,3 +45,24 @@ def test_setup_refuses_ambiguous_or_unmanaged_objects():
         )
     with pytest.raises(ValueError, match="not managed"):
         require_managed({"description": "Personal dashboard"})
+
+
+def test_localization_finds_existing_object_by_legacy_name():
+    original = {"id": 42, "name": "Commits Collected"}
+    assert find_named([original], "Commits coletados", "Commits Collected") is original
+    renamed = {"id": 42, "name": "Commits coletados"}
+    assert find_named([renamed], "Commits coletados", "Commits Collected") is renamed
+
+
+def test_localization_refuses_competing_legacy_and_translated_objects():
+    import pytest
+
+    with pytest.raises(ValueError, match="Ambiguous"):
+        find_named(
+            [
+                {"id": 42, "name": "Commits Collected"},
+                {"id": 43, "name": "Commits coletados"},
+            ],
+            "Commits coletados",
+            "Commits Collected",
+        )

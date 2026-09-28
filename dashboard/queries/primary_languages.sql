@@ -1,8 +1,8 @@
-select coalesce(primary_language,'Unknown') as primary_language, count(*) as repositories
+select coalesce(primary_language,'Não informada') as "Linguagem principal", count(*) as "Repositórios"
 from analytics.dim_repository
 
 where 1=1
 [[and {{repository}}]]
 [[and {{language}}]]
 
-group by primary_language order by repositories desc
+group by primary_language order by "Repositórios" desc
