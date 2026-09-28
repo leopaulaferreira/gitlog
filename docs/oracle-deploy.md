@@ -32,3 +32,23 @@ O subdomínio precisa apontar por DNS para `147.15.127.35`, e o Nginx precisa te
 um certificado TLS válido antes de expor a tela de login. Até isso ser feito, o
 Metabase permanece apenas na rede privada dos containers. Com 1 GiB de RAM e
 outros serviços ativos, confira `docker stats` e o uso de swap após a inicialização.
+
+## Deploy automático pelo GitHub Actions
+
+Pushes para `main` executam `.github/workflows/deploy-oracle.yml`. O workflow
+atualiza o clone na VM, valida o Compose, reconstrói ingestion/dbt, aplica
+migrations e provisioning, roda os modelos e os testes dbt. Ele não reexecuta a
+ingestão do GitHub em todo deploy; rode a ingestão manualmente quando quiser
+atualizar os dados. O workflow também não inicia o Metabase, que deve permanecer
+parado enquanto a VM não tiver memória suficiente.
+
+Cadastre no repositório, em **Settings → Secrets and variables → Actions**:
+
+- Secret `ORACLE_SSH_PRIVATE_KEY`: chave privada exclusiva do deploy.
+- Secret `ORACLE_SSH_KNOWN_HOSTS`: linha validada da chave SSH do servidor.
+- Variable `ORACLE_SSH_HOST`: IP ou hostname SSH da VM.
+- Variable `ORACLE_SSH_USER`: usuário SSH (atualmente `ubuntu`).
+
+O usuário SSH precisa poder atualizar `/home/ubuntu/gitlog` e executar Docker
+sem senha. Nunca use a chave pessoal de administração como segredo do workflow.
+O workflow pode ser iniciado manualmente pela aba **Actions**.

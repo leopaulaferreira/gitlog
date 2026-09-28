@@ -1,0 +1,52 @@
+name: Deploy Oracle VM
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-oracle
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy and validate analytics
+        env:
+          SSH_HOST: ${{ vars.ORACLE_SSH_HOST }}
+          SSH_USER: ${{ vars.ORACLE_SSH_USER }}
+        run: |
+          trap 'rm -f ~/.ssh/id_ed25519' EXIT
+          test -n "$SSH_HOST"
+          test -n "$SSH_USER"
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /home/ubuntu/gitlog
+          git fetch origin main
+          git reset --hard origin/main
+
+          export LOCAL_UID=1001 LOCAL_GID=1001
+          compose=(docker compose --env-file .env --profile tools -f docker-compose.yml -f docker-compose.oracle.yml)
+          "${compose[@]}" config --quiet
+          "${compose[@]}" build ingestion dbt
+          "${compose[@]}" run --rm ingestion migrate
+          "${compose[@]}" run --rm --entrypoint python ingestion scripts/provision_analytics.py
+          "${compose[@]}" run --rm dbt run
+          "${compose[@]}" run --rm dbt test
+          REMOTE
