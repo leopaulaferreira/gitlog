@@ -62,3 +62,19 @@ coverage:
 	$(BIN)/python -m coverage run --branch --source=ingestion -m pytest -m 'not integration' -q
 	$(BIN)/python scripts/test_integration.py --coverage
 	$(BIN)/python -m coverage report -m
+
+.PHONY: analytics-init dbt-debug dbt-run dbt-test dbt-docs
+analytics-init:
+	$(BIN)/python scripts/provision_analytics.py
+
+dbt-debug:
+	docker compose run --rm dbt debug
+
+dbt-run:
+	docker compose run --rm dbt run
+
+dbt-test:
+	docker compose run --rm dbt test
+
+dbt-docs:
+	docker compose run --rm dbt docs generate

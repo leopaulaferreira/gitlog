@@ -30,3 +30,9 @@ data/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# dbt generated artifacts
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+dbt/.user.yml

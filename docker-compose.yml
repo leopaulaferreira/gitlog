@@ -20,5 +20,21 @@ services:
       start_period: 10s
     stop_grace_period: 30s
 
+  dbt:
+    build: ./docker/dbt
+    profiles: [tools]
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    environment:
+      DBT_HOST: postgres
+      DBT_USER: ${DBT_USER:-gitlog_dbt}
+      DBT_ENV_SECRET_PASSWORD: ${DBT_PASSWORD:-}
+      POSTGRES_DB: ${POSTGRES_DB:-gitlog}
+      HOME: /tmp
+    volumes:
+      - ./dbt:/usr/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:

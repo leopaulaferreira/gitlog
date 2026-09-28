@@ -31,7 +31,7 @@ def main() -> int:
     ]
     try:
         subprocess.run(
-            [*command, "up", "-d", "--wait", "--wait-timeout", "90"],
+            [*command, "up", "-d", "--wait", "--wait-timeout", "90", "postgres"],
             env=env,
             check=True,
         )
