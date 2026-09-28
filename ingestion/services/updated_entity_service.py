@@ -15,6 +15,7 @@ from ingestion.extractors.repositories import RepositoryExtractor
 from ingestion.loaders.raw_loader import RawLoader
 from ingestion.loaders.updated_entity_loader import UpdatedEntityLoader
 from ingestion.models.github_models import Identifier, Repository
+from ingestion.observability import run_context, scoped_run, summarize
 
 logger = logging.getLogger(__name__)
 number_adapter = TypeAdapter(Identifier)
@@ -38,12 +39,14 @@ class UpdatedEntityService:
             clock,
         )
 
+    @scoped_run
     def run(self, repositories: tuple[str, ...], *, full_refresh: bool = False) -> int:
         failures = 0
         entity = self.extractor.entity
         for name in repositories:
             run_id, started, extracted_at = uuid4(), time.monotonic(), self.clock()
             context = {"entity": entity, "repository": name, "run_id": str(run_id)}
+            run_context.set(context)
             self.postgres.start_run(
                 run_id, name, extracted_at, pipeline=f"{entity}_ingestion"
             )
@@ -153,6 +156,16 @@ class UpdatedEntityService:
                         run_id, extracted, raw_path, type(error).__name__
                     )
                 except Exception:
+                    summarize(
+                        self.summaries,
+                        logger,
+                        context,
+                        extracted,
+                        None,
+                        "UNKNOWN",
+                        started,
+                        type(error).__name__,
+                    )
                     logger.error("entity.audit_failed", extra=context)
                     raise
                 logger.error(
@@ -165,6 +178,16 @@ class UpdatedEntityService:
                         "duration": time.monotonic() - started,
                     },
                 )
+                summarize(
+                    self.summaries,
+                    logger,
+                    context,
+                    extracted,
+                    0,
+                    "FAILED",
+                    started,
+                    type(error).__name__,
+                )
                 failures += 1
                 continue
             logger.info(
@@ -175,5 +198,8 @@ class UpdatedEntityService:
                     "records_loaded": loaded,
                     "duration": time.monotonic() - started,
                 },
+            )
+            summarize(
+                self.summaries, logger, context, extracted, loaded, "SUCCESS", started
             )
         return failures

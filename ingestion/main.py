@@ -19,9 +19,11 @@ from ingestion.loaders.postgres_loader import PostgresLoader
 from ingestion.loaders.raw_loader import RawLoader
 from ingestion.loaders.updated_entity_loader import IssueLoader, PullRequestLoader
 from ingestion.logging_config import configure_logging
+from ingestion.observability import print_summaries
 from ingestion.services.commit_service import CommitService
 from ingestion.services.ingestion_service import IngestionService
 from ingestion.services.updated_entity_service import UpdatedEntityService
+from ingestion.status import print_status, snapshot
 
 
 def main() -> int:
@@ -29,7 +31,7 @@ def main() -> int:
         prog="gitlog",
         description=(
             "GitLog — Turning GitHub activity into structured data and "
-            "actionable insights. Phase 4: repository ingestion, "
+            "actionable insights. Phase 5: reliable repository ingestion, "
             "commits, issues and pull requests."
         ),
     )
@@ -37,6 +39,10 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command")
     commands.add_parser(
         "migrate", help="Apply migrations and provision the ingestion role"
+    )
+    status_command = commands.add_parser("status", help="Show audit and checkpoints")
+    status_command.add_argument(
+        "--json", action="store_true", help="Machine-readable output"
     )
     commands.add_parser("repositories", help="Ingest configured repositories")
     for name, help_text in (
@@ -70,6 +76,13 @@ def main() -> int:
                 migrate(connection, database)
             logger.info("migrations.completed")
             return 0
+        if args.command == "status":
+            with psycopg.connect(
+                **database.connection_kwargs(), autocommit=True
+            ) as connection:
+                report = snapshot(connection)
+            print_status(report, as_json=args.json)
+            return 0
         settings = IngestionSettings.from_env()
         with GitHubClient() as github:
             with psycopg.connect(
@@ -84,26 +97,35 @@ def main() -> int:
                 failures = 0
                 for command in selected:
                     if command == "repositories":
-                        failures += IngestionService(
+                        service = IngestionService(
                             RepositoryExtractor(github), raw, PostgresLoader(connection)
-                        ).run(settings.repositories)
+                        )
                     elif command == "commits":
-                        failures += CommitService(
+                        service = CommitService(
                             CommitExtractor(github, per_page=args.per_page),
                             raw,
                             CommitLoader(connection),
-                        ).run(settings.repositories, full_refresh=args.full_refresh)
+                        )
                     else:
                         extractor, loader = (
                             (IssueExtractor, IssueLoader)
                             if command == "issues"
                             else (PullRequestExtractor, PullRequestLoader)
                         )
-                        failures += UpdatedEntityService(
+                        service = UpdatedEntityService(
                             extractor(github, per_page=args.per_page),
                             raw,
                             loader(connection),
-                        ).run(settings.repositories, full_refresh=args.full_refresh)
+                        )
+                    try:
+                        options = (
+                            {}
+                            if command == "repositories"
+                            else {"full_refresh": args.full_refresh}
+                        )
+                        failures += service.run(settings.repositories, **options)
+                    finally:
+                        print_summaries(getattr(service, "summaries", []))
         return 1 if failures else 0
     except Exception as error:
         logger.error("command.failed", extra={"error_type": type(error).__name__})

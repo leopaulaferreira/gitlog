@@ -9,6 +9,7 @@ from ingestion.extractors.repositories import RepositoryExtractor
 from ingestion.loaders.postgres_loader import PostgresLoader
 from ingestion.loaders.raw_loader import RawLoader
 from ingestion.models.github_models import Repository
+from ingestion.observability import run_context, scoped_run, summarize
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +22,19 @@ class IngestionService:
         self.raw = raw
         self.postgres = postgres
 
+    @scoped_run
     def run(self, repositories: tuple[str, ...]) -> int:
         """Continue after an individual failure; return the failed repository count."""
         failures = 0
         for repository in repositories:
             run_id = uuid4()
             started = time.monotonic()
-            context = {"repository": repository, "run_id": str(run_id)}
+            context = {
+                "repository": repository,
+                "entity": "repositories",
+                "run_id": str(run_id),
+            }
+            run_context.set(context)
             # If audit cannot start, stop before calling the API.
             self.postgres.start_run(run_id, repository, datetime.now(UTC))
             logger.info("ingestion.start", extra=context)
@@ -50,6 +57,16 @@ class IngestionService:
                 try:
                     self.postgres.fail_run(run_id, extracted, raw_path, category)
                 except Exception:
+                    summarize(
+                        self.summaries,
+                        logger,
+                        context,
+                        extracted,
+                        None,
+                        "UNKNOWN",
+                        started,
+                        type(error).__name__,
+                    )
                     logger.error("ingestion.audit_failed", extra=context)
                     raise
                 logger.error(
@@ -59,6 +76,16 @@ class IngestionService:
                         "error_type": category,
                         "duration": time.monotonic() - started,
                     },
+                )
+                summarize(
+                    self.summaries,
+                    logger,
+                    context,
+                    extracted,
+                    0,
+                    "FAILED",
+                    started,
+                    type(error).__name__,
                 )
                 failures += 1
                 continue
@@ -70,5 +97,8 @@ class IngestionService:
                     "records": loaded,
                     "duration": time.monotonic() - started,
                 },
+            )
+            summarize(
+                self.summaries, logger, context, extracted, loaded, "SUCCESS", started
             )
         return failures

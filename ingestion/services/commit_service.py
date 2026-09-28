@@ -11,6 +11,7 @@ from ingestion.loaders.commit_loader import CommitLoader
 from ingestion.loaders.raw_loader import RawLoader
 from ingestion.models.commits import Commit, Reference
 from ingestion.models.github_models import Repository
+from ingestion.observability import run_context, scoped_run, summarize
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +22,15 @@ class CommitService:
     ) -> None:
         self.extractor, self.raw, self.postgres = extractor, raw, postgres
 
+    @scoped_run
     def run(self, repositories: tuple[str, ...], *, full_refresh: bool = False) -> int:
         failures = 0
         for name in repositories:
             run_id = uuid4()
             started = time.monotonic()
             extracted_at = datetime.now(UTC)
-            context = {"repository": name, "run_id": str(run_id)}
+            context = {"repository": name, "entity": "commits", "run_id": str(run_id)}
+            run_context.set(context)
             self.postgres.start_run(
                 run_id, name, extracted_at, pipeline="commit_ingestion"
             )
@@ -158,6 +161,16 @@ class CommitService:
                         run_id, extracted, raw_path, type(error).__name__
                     )
                 except Exception:
+                    summarize(
+                        self.summaries,
+                        logger,
+                        context,
+                        extracted,
+                        None,
+                        "UNKNOWN",
+                        started,
+                        type(error).__name__,
+                    )
                     logger.error("commits.audit_failed", extra=context)
                     raise
                 logger.error(
@@ -169,6 +182,16 @@ class CommitService:
                         "records_loaded": 0,
                         "duration": time.monotonic() - started,
                     },
+                )
+                summarize(
+                    self.summaries,
+                    logger,
+                    context,
+                    extracted,
+                    0,
+                    "FAILED",
+                    started,
+                    type(error).__name__,
                 )
                 failures += 1
                 continue
@@ -182,5 +205,8 @@ class CommitService:
                     "records_loaded": loaded,
                     "duration": time.monotonic() - started,
                 },
+            )
+            summarize(
+                self.summaries, logger, context, extracted, loaded, "SUCCESS", started
             )
         return failures
