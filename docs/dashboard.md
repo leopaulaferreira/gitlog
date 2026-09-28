@@ -49,8 +49,36 @@ O e-mail padrão é `admin@gitlog.local`: é um login local, não uma conta de e
 externa. Leia a senha **localmente no seu `.env`** para entrar na interface.
 
 Em uma instância já configurada, use credenciais de um administrador existente.
-O setup não recria usuários nem redefine senhas. Credenciais de `.env` precisam
+O setup não recria a conta administrativa nem redefine senhas; ele cria a conta
+de recrutador apenas quando ela ainda não existe. Credenciais de `.env` precisam
 continuar correspondendo à instância; alterar o arquivo não altera a senha no BI.
+
+O mesmo comando cria de forma idempotente o usuário **user@teste.com** e o grupo
+**GitLog — Recrutadores**, com a senha pública de demonstração
+**GitLogDemo123456**. A conta abre o dashboard e usa seus filtros, mas não cria
+consultas, baixa resultados, edita os cards, administra a instância ou navega por
+outras coleções. O login é intencionalmente compartilhado e serve apenas para
+dados públicos de demonstração. `make demo-config` preserva valores existentes e
+preenche essas credenciais nos arquivos `.env` antigos.
+
+O Metabase combina permissões de todos os grupos do usuário. Por isso, o setup
+desativa criação de consultas, downloads e edição do modelo para a permissão
+padrão **All Users**, e remove o acesso genérico às coleções. O grupo de
+recrutadores recebe leitura apenas na coleção GitLog — Análises. Embora a
+instância permita abrir os dados no construtor de consultas, a conta não pode
+criar consultas; os cartões salvos usam uma conexão PostgreSQL separada que só
+consegue ler `analytics`. Essa configuração vale para todos os usuários não
+administradores da instância e é aplicada somente depois que os cards são criados.
+O setup recusa criar a conta automaticamente se SMTP estiver configurado, para
+evitar disparar um e-mail de convite; nessa situação, desligue SMTP durante o
+provisionamento da conta ou faça a criação controlada pela administração.
+
+Para desativar o login público, remova ou desative `user@teste.com` em
+**Administração → Pessoas**, e remova o grupo **GitLog — Recrutadores**. Para
+trocar a senha, entre na conta e use as configurações pessoais. A senha nova deve
+seguir as regras de senha do Metabase; `make dashboard-setup` não redefine senhas
+existentes. A configuração padrão exige pelo menos 15 caracteres conforme a
+[política de senha do Metabase](https://www.metabase.com/docs/latest/people-and-groups/changing-password-complexity).
 
 O script cria a conexão restrita, a coleção e o dashboard **GitLog — Análises**.
 Depois cria/atualiza os 14 cards definidos em

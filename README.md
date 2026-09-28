@@ -181,6 +181,11 @@ Abra **http://localhost:3000**, entre com `METABASE_ADMIN_EMAIL` e a senha
 `METABASE_ADMIN_PASSWORD` guardada no `.env`, e abra a coleção/dashboard
 **GitLog — Análises**. O setup imprime o link exato, sem imprimir a senha.
 
+Para apresentar o painel, use também a conta de demonstração já provisionada:
+`user@teste.com` / `GitLogDemo123456`. Ela pode abrir o dashboard e usar os
+filtros; não pode criar consultas, baixar dados, editar cards ou acessar outras
+coleções. Essas credenciais são públicas e exclusivas para visualizar a demo.
+
 Para atualizar uma instalação existente, preserve seu `.env` e suas senhas;
 `make demo-config` preenche apenas senhas ausentes/de exemplo. Não sobrescreva
 credenciais de volumes existentes. A demonstração usa a API real: se o repositório
@@ -234,6 +239,7 @@ Para mostrar somente a ajuda, execute `.venv/bin/gitlog --help`.
 | `METABASE_DB_PASSWORD` | Senha do banco interno do Metabase, em volume separado |
 | `METABASE_PORT` | Porta HTTP local, padrão 3000 |
 | `METABASE_ADMIN_EMAIL`, `METABASE_ADMIN_PASSWORD` | Conta local usada pelo setup do dashboard |
+| `METABASE_RECRUITER_EMAIL`, `METABASE_RECRUITER_PASSWORD` | Conta pública de demonstração, restrita ao dashboard; não usar para dados privados |
 | `LOCAL_UID`, `LOCAL_GID` | Dono dos artefatos dbt no host Linux |
 
 O Compose lê `.env` automaticamente. Os comandos de migração e ingestão

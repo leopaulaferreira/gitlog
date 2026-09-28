@@ -25,6 +25,10 @@ def main():
             set_key(path, key, secrets.token_urlsafe(32) + "aA1!")
     if not values.get("METABASE_ADMIN_EMAIL"):
         set_key(path, "METABASE_ADMIN_EMAIL", "admin@gitlog.local")
+    if not values.get("METABASE_RECRUITER_EMAIL"):
+        set_key(path, "METABASE_RECRUITER_EMAIL", "user@teste.com")
+    if not values.get("METABASE_RECRUITER_PASSWORD"):
+        set_key(path, "METABASE_RECRUITER_PASSWORD", "GitLogDemo123456")
     for key, value in [("LOCAL_UID", os.getuid()), ("LOCAL_GID", os.getgid())]:
         set_key(path, key, str(value))
     path.chmod(0o600)

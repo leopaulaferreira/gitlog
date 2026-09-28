@@ -15,6 +15,9 @@ LEGACY_MANAGED = "Managed by GitLog: dashboard/cards.json."
 MANAGED = TRANSLATIONS["managed"]
 NAME = TRANSLATIONS["name"]
 LEGACY_NAME = TRANSLATIONS["legacy_name"]
+RECRUITER_EMAIL = "user@teste.com"
+RECRUITER_GROUP = "GitLog — Recrutadores"
+RECRUITER_COLLECTION = "read"
 PARAMETERS = [
     {
         "id": "repository",
@@ -290,15 +293,158 @@ def provision_dashboard(client, database_details):
     return dashboard["id"], len(placements)
 
 
+def provision_recruiter(client, database_id, collection_id, dashboard_id):
+    """Create a persistent dashboard-only account and least-privilege permissions."""
+    groups = items(api(client, "GET", "/api/permissions/group"))
+    all_users = next(
+        (
+            group
+            for group in groups
+            if group["magic_group_type"] == "all-internal-users"
+        ),
+        None,
+    )
+    if not all_users:
+        raise ValueError("Metabase All Users group is missing.")
+    group = find_named(groups, RECRUITER_GROUP)
+    if group and group["magic_group_type"]:
+        raise ValueError("Recruiter group name is reserved by another Metabase group.")
+    if group is None:
+        group = api(client, "POST", "/api/permissions/group", {"name": RECRUITER_GROUP})
+
+    users = items(api(client, "GET", "/api/user"))
+    configured_email = os.environ.get("METABASE_RECRUITER_EMAIL", RECRUITER_EMAIL)
+    user = next(
+        (
+            row
+            for row in users
+            if row["email"].casefold() == configured_email.casefold()
+        ),
+        None,
+    )
+    if user and user.get("is_superuser"):
+        raise ValueError("The recruiter login already belongs to an administrator.")
+    properties = api(client, "GET", "/api/session/properties")
+    if user is None:
+        if properties.get("email-configured?"):
+            raise ValueError(
+                "Email is configured; refusing to trigger a Metabase invitation email."
+            )
+        api(
+            client,
+            "POST",
+            "/api/user",
+            {
+                "email": configured_email,
+                "first_name": "GitLog",
+                "last_name": "Recrutador",
+                "password": os.environ["METABASE_RECRUITER_PASSWORD"],
+            },
+        )
+        users = items(api(client, "GET", "/api/user"))
+        user = next(
+            row
+            for row in users
+            if row["email"].casefold() == configured_email.casefold()
+        )
+        api(
+            client,
+            "PUT",
+            f"/api/user/{user['id']}",
+            {"locale": TRANSLATIONS["locale"]},
+        )
+
+    # A login used by recruiters must belong only to All Users and this viewer group.
+    memberships = api(client, "GET", "/api/permissions/membership")
+    current = memberships.get(str(user["id"]), [])
+    member_group_ids = {item["group_id"] for item in current}
+    if group["id"] not in member_group_ids:
+        api(
+            client,
+            "POST",
+            "/api/permissions/membership",
+            {"group_id": group["id"], "user_id": user["id"]},
+        )
+    for membership in current:
+        if membership["group_id"] not in {all_users["id"], group["id"]}:
+            api(
+                client,
+                "DELETE",
+                f"/api/permissions/membership/{membership['membership_id']}",
+            )
+
+    # Metabase permissions are additive: narrow the built-in All Users baseline
+    # so its defaults cannot grant this account SQL, raw data, or other collections.
+    graph = api(client, "GET", "/api/permissions/graph")
+    everyone = graph["groups"][str(all_users["id"])]
+    everyone[str(database_id)] = {
+        "view-data": "unrestricted",
+        "create-queries": "no",
+        "download": {"schemas": "none"},
+        "data-model": {"schemas": "none"},
+        "details": "no",
+        "transforms": "no",
+    }
+    # Newly-created Metabase groups receive permissive defaults. Override those
+    # defaults for every current data source, including Metabase's sample DB.
+    recruiter_database_permissions = graph["groups"].setdefault(str(group["id"]), {})
+    for source_id in recruiter_database_permissions:
+        recruiter_database_permissions[source_id] = {
+            "view-data": "unrestricted",
+            "create-queries": "no",
+            "download": {"schemas": "none"},
+            "data-model": {"schemas": "none"},
+            "details": "no",
+            "transforms": "no",
+        }
+    api(client, "PUT", "/api/permissions/graph", graph)
+
+    collections = api(client, "GET", "/api/collection/graph")
+    everyone_collections = collections["groups"][str(all_users["id"])]
+    everyone_collections["root"] = "none"
+    everyone_collections[str(collection_id)] = "none"
+    recruiter_collections = collections["groups"].setdefault(str(group["id"]), {})
+    recruiter_collections["root"] = "none"
+    recruiter_collections[str(collection_id)] = RECRUITER_COLLECTION
+    api(
+        client,
+        "PUT",
+        "/api/collection/graph",
+        {"revision": collections["revision"], "groups": collections["groups"]},
+    )
+
+    # Check membership, non-admin role, and the effective collection/database policy.
+    confirmed = next(
+        row for row in items(api(client, "GET", "/api/user")) if row["id"] == user["id"]
+    )
+    if confirmed.get("is_superuser"):
+        raise ValueError("The recruiter login unexpectedly has administrator access.")
+    collection_access = api(client, "GET", "/api/collection/graph")
+    if collection_access["groups"][str(group["id"])].get(str(collection_id)) != "read":
+        raise ValueError("Could not confirm read access to the analytics collection.")
+    permissions = api(client, "GET", "/api/permissions/graph")
+    default_database_permissions = permissions["groups"][str(all_users["id"])].get(
+        str(database_id), {}
+    )
+    if default_database_permissions.get("create-queries", "no") != "no":
+        raise ValueError("Could not confirm that ad-hoc query creation is disabled.")
+    return user["id"]
+
+
 def main():
     load_dotenv(ROOT / ".env", override=False)
     base_url = f"http://127.0.0.1:{os.environ.get('METABASE_PORT', '3000')}"
     email = os.environ.get("METABASE_ADMIN_EMAIL", "")
     password = os.environ.get("METABASE_ADMIN_PASSWORD", "")
     try:
+        recruiter_password = os.environ.get("METABASE_RECRUITER_PASSWORD", "")
         if not email or not password or not os.environ.get("METABASE_READER_PASSWORD"):
             raise ValueError(
                 "Configure Metabase credentials in .env; see docs/dashboard.md."
+            )
+        if not recruiter_password or len(recruiter_password) < 15:
+            raise ValueError(
+                "METABASE_RECRUITER_PASSWORD must have at least 15 characters."
             )
         details = {
             "host": "postgres",
@@ -314,8 +460,16 @@ def main():
             setup(client, email, password)
             configure_localization(client)
             dashboard_id, count = provision_dashboard(client, details)
+            database = find_named(items(api(client, "GET", "/api/database")), NAME)
+            collection = find_named(items(api(client, "GET", "/api/collection")), NAME)
+            recruiter_id = provision_recruiter(
+                client, database["id"], collection["id"], dashboard_id
+            )
         print(
-            f"{NAME}: {base_url}/dashboard/{dashboard_id} ({count} cartões validados)"
+            f"{NAME}: {base_url}/dashboard/{dashboard_id} ({count} cartões validados); "
+            "conta de demonstração "
+            f"{os.environ.get('METABASE_RECRUITER_EMAIL', RECRUITER_EMAIL)} "
+            f"provisionada (ID {recruiter_id})"
         )
         return 0
     except (httpx.HTTPError, RuntimeError, ValueError) as error:
