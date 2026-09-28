@@ -78,3 +78,14 @@ dbt-test:
 
 dbt-docs:
 	docker compose run --rm dbt docs generate
+
+.PHONY: demo-config dashboard-setup
+demo-config:
+	$(BIN)/python scripts/demo_config.py
+
+dashboard-setup:
+	$(BIN)/python scripts/setup_metabase.py
+
+.PHONY: dashboard-check
+dashboard-check:
+	$(BIN)/python -m scripts.validate_dashboard

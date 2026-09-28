@@ -1,0 +1,336 @@
+[
+  {
+    "key": "repositories",
+    "name": "Repositories Monitored",
+    "display": "scalar",
+    "description": "Current repositories with ingested metadata. Date range does not apply to this snapshot KPI.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ]
+    },
+    "visualization_settings": {}
+  },
+  {
+    "key": "commits",
+    "name": "Commits Collected",
+    "display": "scalar",
+    "description": "Collected rows. Date filter applies to commit_date in UTC. No contributors are inferred.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_commits",
+        "commit_date"
+      ]
+    },
+    "visualization_settings": {}
+  },
+  {
+    "key": "pull_requests",
+    "name": "Pull Requests",
+    "display": "scalar",
+    "description": "Collected rows. Date filter applies to created_date in UTC. No contributors are inferred.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_pull_requests",
+        "created_date"
+      ]
+    },
+    "visualization_settings": {}
+  },
+  {
+    "key": "issues",
+    "name": "Issues",
+    "display": "scalar",
+    "description": "Collected rows. Date filter applies to created_date in UTC. No contributors are inferred.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_issues",
+        "created_date"
+      ]
+    },
+    "visualization_settings": {}
+  },
+  {
+    "key": "merged_prs",
+    "name": "Merged Pull Requests",
+    "display": "scalar",
+    "description": "Collected rows. Date filter applies to merged_date in UTC. No contributors are inferred.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_pull_requests",
+        "merged_date"
+      ]
+    },
+    "visualization_settings": {}
+  },
+  {
+    "key": "closed_issues",
+    "name": "Closed Issues",
+    "display": "scalar",
+    "description": "Collected rows. Date filter applies to closed_date in UTC. No contributors are inferred.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_issues",
+        "closed_date"
+      ]
+    },
+    "visualization_settings": {}
+  },
+  {
+    "key": "commits_over_time",
+    "name": "Commits over time",
+    "display": "line",
+    "description": "Dated collected commits per UTC day. Undated commits remain in the fact and all-time KPI.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_repository_daily_metrics",
+        "activity_date"
+      ]
+    },
+    "visualization_settings": {
+      "graph.dimensions": [
+        "activity_date"
+      ],
+      "graph.metrics": [
+        "commits"
+      ]
+    }
+  },
+  {
+    "key": "pull_requests_over_time",
+    "name": "Pull Requests — Opened vs Merged",
+    "display": "line",
+    "description": "Events on their creation or merge date, not cohorts of PRs created together.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_repository_daily_metrics",
+        "activity_date"
+      ]
+    },
+    "visualization_settings": {
+      "graph.dimensions": [
+        "activity_date"
+      ],
+      "graph.metrics": [
+        "opened",
+        "merged"
+      ]
+    }
+  },
+  {
+    "key": "issues_over_time",
+    "name": "Issues — Opened vs Closed",
+    "display": "line",
+    "description": "Creations and latest closure of currently closed issues; reopen history is unavailable.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_repository_daily_metrics",
+        "activity_date"
+      ]
+    },
+    "visualization_settings": {
+      "graph.dimensions": [
+        "activity_date"
+      ],
+      "graph.metrics": [
+        "opened",
+        "closed"
+      ]
+    }
+  },
+  {
+    "key": "active_repositories",
+    "name": "Most Active Repositories — Commits",
+    "display": "bar",
+    "description": "Ranking by collected commit count. This is not an Activity Score.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_repository_daily_metrics",
+        "activity_date"
+      ]
+    },
+    "visualization_settings": {
+      "graph.dimensions": [
+        "full_name"
+      ],
+      "graph.metrics": [
+        "commits"
+      ]
+    }
+  },
+  {
+    "key": "merge_time",
+    "name": "Pull Request Merge Time — Hours",
+    "display": "bar",
+    "description": "Weighted average elapsed creation-to-merge hours, for merges in the selected period. No merges means no average.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_repository_daily_metrics",
+        "activity_date"
+      ]
+    },
+    "visualization_settings": {
+      "graph.dimensions": [
+        "full_name"
+      ],
+      "graph.metrics": [
+        "average_pr_merge_time_hours"
+      ]
+    }
+  },
+  {
+    "key": "repository_activity",
+    "name": "Repository Activity Over Time — Commits",
+    "display": "line",
+    "description": "One series per repository, measured in collected commits, using UTC dates.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_repository_daily_metrics",
+        "activity_date"
+      ]
+    },
+    "visualization_settings": {
+      "graph.dimensions": [
+        "activity_date",
+        "full_name"
+      ],
+      "graph.metrics": [
+        "commits"
+      ]
+    }
+  },
+  {
+    "key": "primary_languages",
+    "name": "Primary Languages — Current Snapshot",
+    "display": "pie",
+    "description": "Repository count by current primary language. Unknown is missing metadata; this is not language history or code volume.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ]
+    },
+    "visualization_settings": {
+      "pie.dimension": "primary_language",
+      "pie.metric": "repositories"
+    }
+  },
+  {
+    "key": "repository_comparison",
+    "name": "Repository comparison",
+    "display": "table",
+    "description": "Compare separate counts and weighted merge time; prs_closed includes merged PRs.",
+    "filters": {
+      "repository": [
+        "dim_repository",
+        "full_name"
+      ],
+      "language": [
+        "dim_repository",
+        "primary_language"
+      ],
+      "date_range": [
+        "fact_repository_daily_metrics",
+        "activity_date"
+      ]
+    },
+    "visualization_settings": {}
+  }
+]
