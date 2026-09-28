@@ -3,8 +3,9 @@
 A VM `amd64` com Docker Compose reutiliza a rede `ubuntu_default` e o PostgreSQL
 existente. O banco `gitlog` e o banco interno `gitlog_metabase` são independentes
 dos dados da aplicação já instalada. Metabase usa heap limitado a 384 MiB e teto
-de 640 MiB; não publica uma porta no host. O Nginx existente deverá encaminhar
-`gitlog.leofe.com.br` para o serviço `metabase:3000` na rede Docker.
+de 640 MiB; não publica uma porta no host. O Nginx existente encaminha
+`gitlog.leofe.com.br` para `metabase:3000` na rede Docker e atende TLS com
+certificado Let's Encrypt.
 
 Crie `.env` a partir de `.env.example`, troque as senhas e configure
 `METABASE_SITE_URL=https://gitlog.leofe.com.br` e gere uma chave fixa
@@ -28,10 +29,20 @@ específico do GitLog recebe apenas o necessário para administrar os dois novos
 bancos. A ingestão pode usar um token GitHub apenas durante sua execução, sem
 salvá-lo no arquivo `.env` do servidor.
 
-O subdomínio precisa apontar por DNS para `147.15.127.35`, e o Nginx precisa ter
-um certificado TLS válido antes de expor a tela de login. Até isso ser feito, o
-Metabase permanece apenas na rede privada dos containers. Com 1 GiB de RAM e
-outros serviços ativos, confira `docker stats` e o uso de swap após a inicialização.
+O registro A de `gitlog.leofe.com.br` aponta para `147.15.127.35`. O certificado
+foi emitido no host em `/home/ubuntu/certbot/conf/live/gitlog.leofe.com.br/` e
+renova pelo cron existente, que executa `certbot renew` e recarrega o Nginx.
+O bloco de servidor usado está em `deploy/oracle/nginx-gitlog.conf`; ele foi
+adicionado à configuração existente sem substituir os hosts virtuais dos outros
+sites. O Nginx redireciona HTTP para HTTPS.
+
+Metabase precisa ficar saudável para o endereço servir a interface. Na VM
+atual, a inicialização parou em `Reading available locales` e o container foi
+mantido parado para preservar memória dos outros serviços; enquanto isso,
+HTTPS apresenta o certificado correto, mas a rota retorna 502. Em VMs com 1 GiB
+de RAM e outros serviços ativos, confira `docker stats`, `docker inspect gitlog-metabase-1`
+e o uso de swap durante a inicialização. A porta 3000 não deve ser publicada
+no host.
 
 ## Deploy automático pelo GitHub Actions
 
