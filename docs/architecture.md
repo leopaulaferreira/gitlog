@@ -1,6 +1,6 @@
 # Arquitetura do GitLog
 
-## Estado atual — Fase 4
+## Estado atual — Fases 6 e 7
 
 O pacote `ingestion` fornece ajuda, versão, migrações e ingestão via `argparse`.
 Ajuda e versão não abrem conexões; `repositories` executa a ingestão configurada.
@@ -31,22 +31,36 @@ de leitura, inserção e atualização nas tabelas de repositories, commits, iss
 e auditoria.
 Migrações SQL empacotadas são aplicadas em transação, com lock e checksum.
 
-## Evolução planejada
+## Analytics e visualização
 
-1. **Ingestão Python:** ampliar os pipelines de repositories, commits, issues e PRs para
-   outras entidades, reutilizando cliente, validação e serviço de execução.
-2. **Raw Layer local:** ampliar os snapshots imutáveis particionados por entidade,
-   repositório e data UTC de extração para as novas entidades.
-3. **PostgreSQL:** ampliar o schema `raw`, que já contém repositories, commits, issues e PRs,
-   checkpoints e auditoria. `staging` e `analytics` serão responsabilidade das transformações.
-4. **dbt:** limpeza, dimensões, fatos, documentação e testes de qualidade.
-5. **Metabase:** consumir a camada analítica com filtros e métricas reais.
-6. **Airflow:** orquestrar o pipeline já funcional pela CLI; execução manual deve
-   continuar possível sem o scheduler.
-7. **MinIO:** substituir o armazenamento raw local quando houver necessidade.
-8. **Spring Boot:** API opcional que consulta exclusivamente a camada analytics.
+O projeto dbt transforma as quatro fontes raw em staging, intermediate e analytics.
+As views normalizam identidades, tipos e UTC; as tabelas dimensionais e fatos
+sustentam o dashboard. A role dbt lê raw e escreve somente nos schemas sob sua
+responsabilidade. O Metabase usa outra role, restrita a SELECT em analytics.
 
-Esses componentes futuros não são requisitos para executar a Fase 4.
+O Compose inicia três serviços permanentes: PostgreSQL GitLog, PostgreSQL interno
+do Metabase e Metabase. O serviço dbt usa profile tools, executado sob demanda.
+A aplicação BI mantém usuários/perguntas/dashboard em volume separado; não usa
+H2 embarcado nem reutiliza o banco operacional como banco interno.
+
+```mermaid
+flowchart LR
+    A[GitHub REST API] --> B[Python Ingestion]
+    B --> C[Raw JSON]
+    C --> D[PostgreSQL]
+    D --> E[dbt]
+    E --> F[Analytics Layer]
+    F --> G[Metabase]
+    G --> H[(Metabase application DB)]
+```
+
+Definições versionadas em dashboard/cards.json e SQL são aplicadas pela API da
+imagem fixa. O dashboard consome marts; transformação, UTC e duração de merge
+permanecem no dbt. Sem história de eventos, snapshots atuais não fornecem
+transições completas, histórico de estrelas ou histórico de linguagens.
+
+Airflow, MinIO e Spring Boot permanecem fases futuras. A sequência atual é manual:
+ingestão → dbt run → dbt test → consulta do dashboard.
 
 ## Configuração e segurança
 
@@ -58,7 +72,8 @@ e identificadores compostos pelo Psycopg, e os logs JSON incluem somente campos
 operacionais selecionados. Erros são registrados pela classe, sem seus payloads.
 
 As dependências de desenvolvimento têm intervalos de versão no `pyproject.toml`;
-não há lockfile nesta etapa. A imagem fixa a versão principal do PostgreSQL, mas
+dbt Core/adaptador e a imagem Metabase têm versões fixadas; dependências
+transitivas ainda não possuem lockfile. A imagem fixa a versão principal do PostgreSQL, mas
 recebe atualizações da tag. Isso permite correções sem prometer builds idênticos;
 fixação por lockfile/digest poderá ser adotada na fase de CI/CD.
 

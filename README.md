@@ -8,22 +8,19 @@ GitLog é um projeto de portfólio de Engenharia de Dados e Software que irá
 transformar atividade real da API pública do GitHub em dados estruturados e análises.
 O desenvolvimento é incremental, com entregas executáveis e verificáveis.
 
-**Estado atual: Fase 5 — confiabilidade, qualidade e observabilidade.** O pipeline consulta
-a API real, preserva JSON por página, valida os campos e faz UPSERT no PostgreSQL
-com auditoria por execução. Commits usam checkpoint por repositório, deduplicação
-por repository ID + SHA e paginação com rate limit e retries. Issues e PRs têm
-UPSERT e checkpoints de atualização separados, sem carregar PRs como issues. Transformações e
-dashboard continuam planejados.
+**Estado atual: Fases 6 e 7 — dbt e GitLog Analytics no Metabase.** A ingestão
+real de repositories, commits, issues e PRs preserva JSON, valida dados e carrega
+PostgreSQL com UPSERT, auditoria e checkpoints. O dbt gera dimensões e fatos; o
+Metabase apresenta métricas sobre os repositórios monitorados, com filtros.
 
 ## Architecture
 
-O fluxo até PostgreSQL está implementado para repositories, commits, issues e PRs. dbt, camada analítica
-e Metabase representam etapas futuras:
+O fluxo abaixo está implementado. Airflow, MinIO e Spring Boot permanecem futuros:
 
 ```mermaid
 flowchart LR
     A[GitHub REST API] --> B[Python Ingestion]
-    B --> C[Raw JSON local]
+    B --> C[Raw JSON]
     C --> D[PostgreSQL]
     D --> E[dbt]
     E --> F[Analytics Layer]
@@ -42,7 +39,8 @@ Detalhes e limites de cada etapa: [arquitetura](docs/architecture.md).
 | Cliente GitHub | HTTPX síncrono | Implementado |
 | Validação / configuração do pipeline | Pydantic, python-dotenv | Implementado |
 | Persistência | Psycopg 3, migrações SQL | Repositories, commits, issues, PRs, checkpoints e auditoria |
-| Transformação / visualização | dbt Core, Metabase | Planejado |
+| Transformação | dbt Core 1.12.5 + dbt-postgres 1.11.0 | 12 models, documentação e testes |
+| Visualização | Metabase 0.63.18 | GitLog Analytics com 14 cards e filtros |
 | Orquestração / data lake | Airflow, MinIO | Fases posteriores |
 
 ## Features
@@ -115,13 +113,78 @@ O [contrato do pipeline](docs/pipeline.md) explica métricas, checkpoints, retri
 constraints e limites. Execute `make coverage` para medir linhas e branches das
 suítes unitária e PostgreSQL, sem meta artificial de 100%.
 
+## Analytics Layer
+
+O projeto [`dbt/`](dbt/) lê as quatro fontes raw e produz views em `staging` e
+`intermediate`, e tabelas em `analytics`. Datas são normalizadas para UTC; valores
+nulos legítimos são preservados. A role dbt é separada da ingestão e a role BI tem
+somente leitura em analytics.
+
+```bash
+make analytics-init
+make dbt-debug
+make dbt-run
+make dbt-test
+make dbt-docs
+```
+
+Os 12 models incluem quatro staging, dois intermediários e seis marts. Os testes
+verificam unicidade, campos obrigatórios, relacionamentos, valores permitidos e
+reconciliação de métricas. Há testes unitários para UTC, commits sem data, PRs
+merged e preenchimento diário. [Operação e limites](docs/analytics.md).
+
 ## Data Model
 
-O schema `raw` contém `repositories`, `commits`, `issues`, `pull_requests`,
-`ingestion_checkpoints` (commits), `entity_checkpoints` (issues/PRs) e
-`pipeline_runs`. A tabela de controle de
-migrações fica em `public`. Campos, constraints e limites estão no
-[modelo de dados](docs/data-model.md).
+O schema `raw` mantém repositories, commits, issues, pull_requests, checkpoints e
+pipeline_runs. O schema `analytics` contém:
+
+| Dimensões / fatos | Granularidade |
+| --- | --- |
+| `dim_repository` | Repository ID estável, atributos atuais |
+| `dim_date` | Data UTC |
+| `fact_commits` | Repository + SHA |
+| `fact_issues` | Issue |
+| `fact_pull_requests` | Pull request |
+| `fact_repository_daily_metrics` | Repository + data |
+
+A série diária contém commits, aberturas/fechamentos de issues e PRs, merges e
+média ponderável de horas até merge. Stars/forks ficam somente no snapshot atual;
+não há histórico inventado, dimensão artificial de contributors ou Activity Score.
+Veja os campos, chaves e o [diagrama Mermaid dimensional](docs/data-model.md).
+
+## Quick Demo
+
+Pré-requisitos: Docker/Compose em execução, Python 3.12+ e Make. Para uma nova instalação:
+
+```bash
+git clone https://github.com/leopaulaferreira/gitlog.git
+cd gitlog
+cp .env.example .env
+make setup
+make demo-config  # Gera senhas locais distintas e preserva valores já configurados
+# Edite .env: configure GITHUB_TOKEN e os repositories desejados.
+docker compose up -d
+make migrate
+make analytics-init
+docker compose build dbt
+make ingest-all
+make dbt-debug
+make dbt-run
+make dbt-test
+make dashboard-setup
+make dashboard-check
+```
+
+A primeira inicialização do Metabase pode levar alguns minutos. Aguarde
+`docker compose ps` mostrar healthy antes de `dashboard-setup`.
+Abra **http://localhost:3000**, entre com `METABASE_ADMIN_EMAIL` e a senha
+`METABASE_ADMIN_PASSWORD` guardada no `.env`, e abra a coleção/dashboard
+**GitLog Analytics**. O setup imprime o link exato, sem imprimir a senha.
+
+Para atualizar uma instalação existente, preserve seu `.env` e suas senhas;
+`make demo-config` preenche apenas senhas ausentes/de exemplo. Não sobrescreva
+credenciais de volumes existentes. A demonstração usa a API real: se o repositório
+não possui issues ou PRs, os respectivos indicadores ficam vazios/zerados.
 
 ## Getting Started
 
@@ -166,13 +229,20 @@ Para mostrar somente a ajuda, execute `.venv/bin/gitlog --help`.
 | `POSTGRES_DB` | Banco inicial; padrão `gitlog` |
 | `POSTGRES_USER` | Usuário de inicialização local; padrão `gitlog` |
 | `POSTGRES_PASSWORD` | Obrigatória no Compose; substitua o exemplo em `.env` |
+| `DBT_USER`, `DBT_PASSWORD` | Role dona dos schemas analíticos; provisionada por analytics-init |
+| `METABASE_READER_USER`, `METABASE_READER_PASSWORD` | Role BI com SELECT somente em analytics |
+| `METABASE_DB_PASSWORD` | Senha do banco interno do Metabase, em volume separado |
+| `METABASE_PORT` | Porta HTTP local, padrão 3000 |
+| `METABASE_ADMIN_EMAIL`, `METABASE_ADMIN_PASSWORD` | Conta local usada pelo setup do dashboard |
+| `LOCAL_UID`, `LOCAL_GID` | Dono dos artefatos dbt no host Linux |
 
 O Compose lê `.env` automaticamente. Os comandos de migração e ingestão
 carregam `.env` do diretório atual sem sobrescrever variáveis já exportadas.
 Ao usar `GitHubClient` diretamente em Python, defina `GITHUB_TOKEN` no ambiente;
 a classe não carrega `.env` implicitamente.
-Somente as três variáveis de inicialização `POSTGRES_DB`,
-`POSTGRES_USER` e `POSTGRES_PASSWORD` são passadas ao container.
+O container PostgreSQL GitLog recebe somente suas variáveis de inicialização.
+O dbt e o Metabase recebem as credenciais específicas para cada serviço; o token
+GitHub não é repassado a esses containers.
 
 O usuário criado pela imagem oficial é administrador do banco local, usado pelas
 migrações. `make migrate` provisiona uma role separada com `USAGE` no schema `raw`
@@ -182,7 +252,7 @@ Essa configuração não é uma implantação de produção.
 ## Running locally
 
 ```bash
-make up                  # Inicia PostgreSQL e aguarda o healthcheck
+make up                  # Inicia PostgreSQL, Metabase e seu banco interno
 docker compose ps
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 make migrate             # Aplica migrações e provisiona a role restrita
@@ -224,6 +294,8 @@ documentados em [GitHub API Client](docs/github-client.md).
 make test
 make test-integration    # PostgreSQL temporário; GitHub continua simulado
 make coverage            # Mede linhas e branches das duas suítes
+make dbt-test            # 142 testes de dados e 3 testes unitários dbt
+make dashboard-check     # SQL, filtros e acesso pelo Metabase real
 make lint
 make format-check
 make check               # Lint, formatação e testes
@@ -252,8 +324,20 @@ checkpoints separados, falhas de raw/SQL/paginação e preservação da Fase 3 n
 
 ## Dashboard
 
-**GitLog Analytics** será desenvolvido no Metabase na Fase 7, depois de validar
-o pipeline e a camada analítica. Nenhuma métrica de demonstração foi criada.
+**GitLog Analytics** disponibiliza analytics dos repositórios monitorados via
+Metabase. São 14 cards: seis KPIs, séries de commits/issues/PRs, ranking por commits,
+tempo de merge, atividade por repositório, linguagens atuais e comparação entre
+repositórios. Os filtros são repository, date range (UTC) e current language.
+
+`make dashboard-setup` cria a conexão de leitura, a coleção, as perguntas e o
+layout de forma repetível. `make dashboard-check` executa consultas e filtros reais
+pelo Metabase e mede planos SQL. Definições, instruções manuais, significado das
+métricas e limites estão em [docs/dashboard.md](docs/dashboard.md).
+
+Screenshots reais podem ser adicionados em `docs/images/dashboard-overview.png`;
+consulte [instruções de captura](docs/images/README.md). Nenhuma captura fictícia
+foi gerada. A camada visual consome os marts dbt, sem reproduzir a transformação
+ou usar fixtures como dados da demonstração.
 
 ## Incremental Loading
 
@@ -337,7 +421,10 @@ gitlog/
 │   ├── test_issues_pull_requests.py
 │   ├── fixtures/
 │   └── integration/
-├── scripts/
+├── dbt/                    # Sources, staging, intermediate, marts e testes
+├── dashboard/              # Cards versionados e SQL nativo do Metabase
+├── docker/dbt/             # Ambiente dbt Python 3.12 separado
+├── scripts/                # Provisionamento, setup BI, validação e testes
 │   └── test_integration.py
 ├── docs/
 │   ├── architecture.md
@@ -357,8 +444,7 @@ gitlog/
 └── README.md
 ```
 
-Diretórios de dbt, Airflow, dashboards e workflows de CI serão adicionados conforme
-essas etapas forem implementadas.
+Airflow, MinIO, Spring Boot e workflows de CI não fazem parte desta entrega.
 
 ## Roadmap
 
@@ -368,8 +454,8 @@ essas etapas forem implementadas.
 - [x] Fase 3: commits — paginação, incremental e idempotência; validação do MVP.
 - [x] Fase 4: issues e pull requests.
 - [x] Fase 5: qualidade, auditoria, status e recuperação documentada de falhas.
-- [ ] Fase 6: dbt — staging, dimensões, fatos e testes.
-- [ ] Fase 7: dashboard Metabase; incluir contributors/languages antes dos KPIs dependentes.
+- [x] Fase 6: dbt — staging, dimensões, fatos e testes.
+- [x] Fase 7: GitLog Analytics no Metabase; sem inventar contributors ou histórico.
 - [ ] Fase 8: Airflow.
 - [ ] Fase 9: MinIO.
 - [ ] Fase 10: CI/CD com GitHub Actions.

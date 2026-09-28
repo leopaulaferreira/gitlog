@@ -88,3 +88,19 @@ está em [dashboard](dashboard.md); reavalie planos e volume antes de criar índ
 
 Referências oficiais: [configuração PostgreSQL do dbt](https://docs.getdbt.com/docs/local/connect-data-platform/postgres-setup)
 e [materializações e índices PostgreSQL](https://docs.getdbt.com/reference/resource-configs/postgres-configs).
+
+## Validação das Fases 6–7
+
+- `dbt debug`: conexão e configuração aprovadas.
+- `dbt run`: 12 models (6 views e 6 tabelas), sem erros.
+- `dbt test`: 142 data tests e 3 unit tests aprovados, sem warnings.
+- `dbt docs generate`: catálogo e documentação gerados.
+- Python: 235 testes unitários e 117 de integração PostgreSQL aprovados.
+- Ruff, Black e `docker compose config`: aprovados.
+- Ingestão real de todos os pipelines concluída; marts com 1 repositório,
+  25 commits, zero issues e zero PRs na consulta realizada.
+- Metabase: 14 cards consultados com filtros, inclusive após reconstruir os marts;
+  segunda execução do setup sem duplicatas; acesso do leitor ao raw negado.
+
+Os logs e relatórios locais ficam em `data/validation/phase6-*` e `phase7-*`.
+Não são versionados porque descrevem uma execução local, não fixtures de produção.
