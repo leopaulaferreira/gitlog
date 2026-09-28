@@ -210,7 +210,7 @@ def test_migrations_are_repeatable_and_checksum_verified(
         admin.execute(
             "SELECT count(*) FROM public.gitlog_schema_migrations"
         ).fetchone()[0]
-        == 3
+        == 4
     )
     with pytest.raises(MigrationError, match="modified"):
         with admin.transaction():
@@ -298,3 +298,39 @@ def test_cli_runs_migrations_and_repository_pipeline(
     documents = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
     assert sum(doc["event"] == "ingestion.completed" for doc in documents) == 2
     assert settings.password.get_secret_value() not in json.dumps(documents)
+
+
+def test_identical_observation_still_rejects_older_inflight_response(
+    writer, repository_payload, tmp_path
+):
+    loader = PostgresLoader(writer)
+    model = Repository.model_validate(repository_payload)
+    now = datetime.now(UTC)
+    runs = [uuid4() for _ in range(3)]
+    for run in runs:
+        loader.start_run(run, model.full_name, now)
+    assert loader.load(model, runs[0], tmp_path / "first.json", now) == 1
+    assert (
+        loader.load(model, runs[1], tmp_path / "same.json", now + timedelta(seconds=20))
+        == 0
+    )
+    assert (
+        loader.load(
+            model.model_copy(update={"stars": 1}),
+            runs[2],
+            tmp_path / "stale.json",
+            now + timedelta(seconds=10),
+        )
+        == 0
+    )
+    assert writer.execute(
+        "SELECT stars, pipeline_run_id, ingested_at FROM raw.repositories"
+    ).fetchone() == (model.stars, runs[0], now + timedelta(seconds=20))
+    assert (
+        writer.execute(
+            "SELECT records_skipped FROM raw.pipeline_runs ORDER BY started_at, id"
+        )
+        .fetchall()
+        .count((1,))
+        == 2
+    )

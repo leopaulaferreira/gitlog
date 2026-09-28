@@ -1,7 +1,7 @@
 """Shared atomic UPSERT/checkpoint loading for mutable issues and pull requests."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -9,6 +9,7 @@ from ingestion.extractors.issues import issue_page
 from ingestion.loaders.postgres_loader import PostgresLoader
 from ingestion.models.github_models import Repository
 from ingestion.models.issues import Issue, IssueFields, PullRequest
+from ingestion.quality import CheckpointError, DataQualityError
 
 
 class UpdatedEntityLoader(PostgresLoader):
@@ -17,11 +18,20 @@ class UpdatedEntityLoader(PostgresLoader):
 
     def checkpoint(self, repository_id: int) -> datetime | None:
         row = self.connection.execute(
-            "SELECT watermark FROM raw.entity_checkpoints "
-            "WHERE repository_id=%s AND entity=%s",
+            "SELECT cp.watermark, r.status, r.pipeline_name "
+            "FROM raw.entity_checkpoints cp LEFT JOIN raw.pipeline_runs r "
+            "ON r.id=cp.pipeline_run_id WHERE cp.repository_id=%s AND cp.entity=%s",
             (repository_id, self.entity),
         ).fetchone()
-        return row[0] if row else None
+        if row is None:
+            return None
+        if (
+            row[1] != "SUCCESS"
+            or row[2] != f"{self.entity}_ingestion"
+            or row[0] > datetime.now(UTC) + timedelta(minutes=5)
+        ):
+            raise CheckpointError("Inconsistent entity checkpoint.")
+        return row[0]
 
     def complete(
         self,
@@ -47,6 +57,8 @@ class UpdatedEntityLoader(PostgresLoader):
             for item in items:
                 model = self.model.model_validate(item)
                 old = selected.get(model.id)
+                if old is not None and old[0].number != model.number:
+                    raise DataQualityError("One entity ID has conflicting numbers.")
                 if old is None or old[0].updated_at <= model.updated_at:
                     selected[model.id] = model, path
         loaded = 0

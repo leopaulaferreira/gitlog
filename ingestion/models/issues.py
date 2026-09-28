@@ -5,18 +5,26 @@ from typing import Annotated, Literal, Self
 from pydantic import AwareDatetime, BaseModel, Field, field_validator, model_validator
 
 from ingestion.models.commits import SHA
-from ingestion.models.github_models import Count, Identifier
+from ingestion.models.github_models import Count, Identifier, Text, nonblank
 
 
 class IssueFields(BaseModel):
     id: Identifier
     number: Identifier
-    title: str
+    title: Text
     state: Literal["open", "closed"]
     author_login: str | None = Field(validation_alias="user")
     created_at: AwareDatetime
     updated_at: AwareDatetime
     closed_at: AwareDatetime | None
+
+    @model_validator(mode="after")
+    def valid_timeline(self) -> Self:
+        if self.updated_at < self.created_at:
+            raise ValueError("Update precedes creation.")
+        if self.closed_at is not None and self.closed_at < self.created_at:
+            raise ValueError("Closure precedes creation.")
+        return self
 
     @field_validator("author_login", mode="before")
     @classmethod
@@ -25,7 +33,7 @@ class IssueFields(BaseModel):
             return None
         if not isinstance(value, dict) or not isinstance(value.get("login"), str):
             raise ValueError("Expected a GitHub user or null.")
-        return value["login"]
+        return nonblank(value["login"])
 
 
 class Issue(IssueFields):
@@ -55,4 +63,6 @@ class PullRequest(IssueFields):
     def merged_is_closed(self) -> Self:
         if self.merged_at is not None and self.state != "closed":
             raise ValueError("A merged pull request must be closed.")
+        if self.merged_at is not None and self.merged_at < self.created_at:
+            raise ValueError("Merge precedes creation.")
         return self

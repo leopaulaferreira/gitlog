@@ -1,5 +1,6 @@
 """Atomically commit repository metadata, commits, checkpoint and audit outcome."""
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,6 +10,7 @@ from ingestion.extractors.commits import page_commits
 from ingestion.loaders.postgres_loader import ConcurrentRunError, PostgresLoader
 from ingestion.models.commits import Commit
 from ingestion.models.github_models import Repository
+from ingestion.quality import CheckpointError, DataQualityError
 
 
 class ConcurrentCommitRunError(ConcurrentRunError):
@@ -21,11 +23,19 @@ class CommitLoader(PostgresLoader):
 
     def checkpoint(self, repository_id: int, branch: str) -> str | None:
         row = self.connection.execute(
-            "SELECT head_sha FROM raw.ingestion_checkpoints "
-            "WHERE repository_id = %s AND branch = %s",
-            (repository_id, branch),
+            "SELECT cp.head_sha, cp.branch, r.status, r.pipeline_name, c.sha "
+            "FROM raw.ingestion_checkpoints cp "
+            "LEFT JOIN raw.pipeline_runs r ON r.id=cp.pipeline_run_id "
+            "LEFT JOIN raw.commits c ON c.repository_id=cp.repository_id "
+            "AND c.sha=cp.head_sha "
+            "WHERE cp.repository_id=%s",
+            (repository_id,),
         ).fetchone()
-        return row[0] if row else None
+        if row is None:
+            return None
+        if row[2] != "SUCCESS" or row[3] != "commit_ingestion" or row[4] is None:
+            raise CheckpointError("Commit checkpoint has no successful loaded history.")
+        return row[0] if row[1] == branch else None
 
     def complete(
         self,
@@ -39,16 +49,27 @@ class CommitLoader(PostgresLoader):
         extracted_at: datetime,
     ) -> int:
         loaded = 0
-        seen: set[str] = set()
+        seen: dict[str, str] = {}
         with self.connection.transaction():
             self.upsert_repository(repository, run_id, repository_path, extracted_at)
             for mode, path in pages:
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 for item in page_commits(mode, payload):
                     commit = Commit.model_validate(item)
+                    fingerprint = hashlib.sha256(
+                        json.dumps(
+                            {
+                                "commit": commit.commit.model_dump(mode="json"),
+                                "parents": [parent.sha for parent in commit.parents],
+                            },
+                            sort_keys=True,
+                        ).encode()
+                    ).hexdigest()
                     if commit.sha in seen:
+                        if seen[commit.sha] != fingerprint:
+                            raise DataQualityError("Conflicting content for one SHA.")
                         continue
-                    seen.add(commit.sha)
+                    seen[commit.sha] = fingerprint
                     values = commit.database_values()
                     values.update(
                         repository_id=repository.id,

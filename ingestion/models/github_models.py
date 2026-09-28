@@ -3,6 +3,7 @@
 from typing import Annotated, Literal, Self
 
 from pydantic import (
+    AfterValidator,
     AliasPath,
     AwareDatetime,
     BaseModel,
@@ -15,7 +16,15 @@ from ingestion.config import validate_repository_name
 
 type Count = Annotated[int, Field(strict=True, ge=0, le=2**63 - 1)]
 type Identifier = Annotated[int, Field(strict=True, gt=0, le=2**63 - 1)]
-type Text = Annotated[str, Field(min_length=1)]
+
+
+def nonblank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("Required text must not be blank.")
+    return value
+
+
+type Text = Annotated[str, Field(min_length=1), AfterValidator(nonblank)]
 
 
 class Repository(BaseModel):
@@ -41,6 +50,8 @@ class Repository(BaseModel):
 
     @model_validator(mode="after")
     def validate_identity(self) -> Self:
+        if self.updated_at < self.created_at:
+            raise ValueError("Repository update precedes creation.")
         validate_repository_name(self.full_name)
         if self.full_name.lower() != f"{self.owner}/{self.name}".lower():
             raise ValueError("Inconsistent repository identity.")

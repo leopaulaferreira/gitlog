@@ -1,5 +1,6 @@
 """One repository and its successful audit outcome commit together."""
 
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -26,6 +27,15 @@ class PostgresLoader:
                 "Use autocommit so each explicit transaction is independent."
             )
         self.connection = connection
+        self._started: dict[UUID, float] = {}
+
+    def _duration_ms(self, run_id: UUID) -> int | None:
+        started = self._started.get(run_id)
+        return (
+            max(0, int((time.monotonic() - started) * 1000))
+            if started is not None
+            else None
+        )
 
     @contextmanager
     def lock(self, repository_id: int) -> Iterator[None]:
@@ -48,8 +58,17 @@ class PostgresLoader:
         updated = self.connection.execute(
             "UPDATE raw.pipeline_runs SET status='SUCCESS', finished_at=%s, "
             "records_extracted=%s, records_loaded=%s, raw_path=%s "
+            ", duration_ms=coalesce(%s, greatest(0, floor(extract(epoch FROM "
+            "(clock_timestamp()-started_at))*1000)::bigint)) "
             "WHERE id=%s AND status='RUNNING'",
-            (datetime.now(UTC), extracted, loaded, str(raw_path), run_id),
+            (
+                datetime.now(UTC),
+                extracted,
+                loaded,
+                str(raw_path),
+                self._duration_ms(run_id),
+                run_id,
+            ),
         )
         if updated.rowcount != 1:
             raise ValueError("Expected one RUNNING pipeline execution.")
@@ -102,6 +121,7 @@ class PostgresLoader:
         *,
         pipeline: str = "repository_ingestion",
     ) -> None:
+        self._started[run_id] = time.monotonic()
         self.connection.execute(
             "INSERT INTO raw.pipeline_runs "
             "(id, pipeline_name, repository, started_at, status) "
@@ -133,37 +153,34 @@ class PostgresLoader:
         values.update(
             ingested_at=extracted_at, raw_path=str(raw_path), pipeline_run_id=run_id
         )
-        columns = list(values)
-        assignments = sql.SQL(", ").join(
-            sql.SQL("{} = EXCLUDED.{}").format(
-                sql.Identifier(column), sql.Identifier(column)
+        loaded = self.upsert_changed(
+            "repositories", values, ("id",), freshness="ingested_at"
+        )
+        if not loaded:
+            # Even an identical observation must prevent an older in-flight
+            # response from replacing it. Preserve the source-change provenance.
+            self.connection.execute(
+                "UPDATE raw.repositories SET ingested_at=GREATEST(ingested_at,%s) "
+                "WHERE id=%s",
+                (extracted_at, repository.id),
             )
-            for column in columns
-            if column != "id"
-        )
-        statement = sql.SQL(
-            "INSERT INTO raw.repositories ({}) VALUES ({}) "
-            "ON CONFLICT (id) DO UPDATE SET {} "
-            "WHERE raw.repositories.ingested_at <= EXCLUDED.ingested_at"
-        ).format(
-            sql.SQL(", ").join(map(sql.Identifier, columns)),
-            sql.SQL(", ").join(sql.Placeholder() for _ in columns),
-            assignments,
-        )
-        return self.connection.execute(statement, list(values.values())).rowcount
+        return loaded
 
     def fail_run(
         self, run_id: UUID, extracted: int, raw_path: Path | None, error: str
     ) -> None:
         updated = self.connection.execute(
             "UPDATE raw.pipeline_runs SET status = 'FAILED', finished_at = %s, "
-            "records_extracted = %s, raw_path = %s, error_message = %s "
+            "records_extracted = %s, raw_path = %s, error_message = %s, "
+            "duration_ms=coalesce(%s, greatest(0, floor(extract(epoch FROM "
+            "(clock_timestamp()-started_at))*1000)::bigint)) "
             "WHERE id = %s AND status = 'RUNNING'",
             (
                 datetime.now(UTC),
                 extracted,
                 str(raw_path) if raw_path else None,
                 error,
+                self._duration_ms(run_id),
                 run_id,
             ),
         )

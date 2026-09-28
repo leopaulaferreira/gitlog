@@ -1,9 +1,11 @@
 """Real PostgreSQL loads for mixed issue pages, PR hydration and atomic checkpoints."""
 
+import hashlib
 import json
 import logging
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 from types import SimpleNamespace
 
 import httpx
@@ -285,7 +287,7 @@ def test_full_refresh_deduplicates_and_rejects_stale_updates(pipelines, writer, 
     assert service.run((NAME,), full_refresh=True) == 0
     assert rows(writer, entity)[-1][1:] == ((4, 0) if entity == "issues" else (6, 0))
     source = state.items[0] if entity == "issues" else state.details[2]
-    source.update(title="stale title", updated_at="2026-01-01T00:00:00Z")
+    source.update(title="stale title", updated_at="2026-09-10T00:00:00Z")
     assert service.run((NAME,), full_refresh=True) == 0
     assert (
         writer.execute(
@@ -581,13 +583,51 @@ def test_migration_upgrade_preserves_existing_repository_and_commit_data(
     ).fetchall()
     repository_id = state.repository["id"]
     before = writer.execute("SELECT id, full_name FROM raw.repositories").fetchall()
-    # Only the runner's isolated test database is modified.
-    admin.execute("DROP TABLE raw.entity_checkpoints, raw.issues, raw.pull_requests")
-    admin.execute(
-        "DELETE FROM public.gitlog_schema_migrations "
-        "WHERE version='003_issues_pull_requests.sql'"
-    )
-    migrate(admin, database_settings)
+    # Rebuild the actual Phase 3 schema in the runner's isolated database.
+    # Snapshot source rows without Phase 5 audit columns, then upgrade forward.
+    tables = ("pipeline_runs", "repositories", "commits", "ingestion_checkpoints")
+    saved = {}
+    for table in tables:
+        cursor = admin.execute(
+            sql.SQL("SELECT * FROM raw.{}").format(sql.Identifier(table))
+        )
+        columns = [column.name for column in cursor.description]
+        keep = [
+            i
+            for i, name in enumerate(columns)
+            if name not in ("duration_ms", "records_skipped")
+        ]
+        saved[table] = (
+            [columns[i] for i in keep],
+            [tuple(row[i] for i in keep) for row in cursor.fetchall()],
+        )
+    with admin.transaction():
+        admin.execute("DROP SCHEMA raw CASCADE")
+        admin.execute("DELETE FROM public.gitlog_schema_migrations")
+        for migration in sorted(
+            files("ingestion.db").joinpath("migrations").iterdir(),
+            key=lambda item: item.name,
+        ):
+            if not migration.name.startswith(("001_", "002_")):
+                continue
+            content = migration.read_text(encoding="utf-8")
+            admin.execute(content)
+            admin.execute(
+                "INSERT INTO public.gitlog_schema_migrations(version, checksum) "
+                "VALUES (%s,%s)",
+                (migration.name, hashlib.sha256(content.encode()).hexdigest()),
+            )
+        for table, (columns, data) in saved.items():
+            for row in data:
+                admin.execute(
+                    sql.SQL("INSERT INTO raw.{} ({}) VALUES ({})").format(
+                        sql.Identifier(table),
+                        sql.SQL(",").join(map(sql.Identifier, columns)),
+                        sql.SQL(",").join(sql.Placeholder() for _ in columns),
+                    ),
+                    row,
+                )
+        migrate(admin, database_settings)
     assert (
         writer.execute("SELECT id, full_name FROM raw.repositories").fetchall()
         == before
