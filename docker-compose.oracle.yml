@@ -1,0 +1,37 @@
+services:
+  # Oracle VM already runs PostgreSQL. Keep the local database services off.
+  postgres:
+    profiles: [local]
+
+  metabase-db:
+    profiles: [local]
+
+  metabase:
+    environment:
+      MB_DB_HOST: ubuntu-postgres-1
+      MB_DB_DBNAME: gitlog_metabase
+      MB_DB_USER: gitlog_metabase_app
+      MB_SITE_URL: ${METABASE_SITE_URL:-https://gitlog.leofe.com.br}
+      JAVA_OPTS: -Xmx384m -XX:+UseSerialGC -XX:ActiveProcessorCount=2
+    ports: !reset []
+    depends_on: !reset []
+    mem_limit: 640m
+
+  dbt:
+    environment:
+      DBT_HOST: ubuntu-postgres-1
+    depends_on: !reset []
+
+  ingestion:
+    build:
+      context: .
+      dockerfile: deploy/oracle/Dockerfile
+    env_file: .env
+    volumes:
+      - ./data/raw:/app/data/raw
+    profiles: [tools]
+
+networks:
+  default:
+    external: true
+    name: ubuntu_default

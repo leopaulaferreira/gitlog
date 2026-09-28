@@ -433,7 +433,9 @@ def provision_recruiter(client, database_id, collection_id, dashboard_id):
 
 def main():
     load_dotenv(ROOT / ".env", override=False)
-    base_url = f"http://127.0.0.1:{os.environ.get('METABASE_PORT', '3000')}"
+    base_url = os.environ.get(
+        "METABASE_URL", f"http://127.0.0.1:{os.environ.get('METABASE_PORT', '3000')}"
+    )
     email = os.environ.get("METABASE_ADMIN_EMAIL", "")
     password = os.environ.get("METABASE_ADMIN_PASSWORD", "")
     try:

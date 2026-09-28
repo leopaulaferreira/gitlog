@@ -191,6 +191,8 @@ Para atualizar uma instalação existente, preserve seu `.env` e suas senhas;
 credenciais de volumes existentes. A demonstração usa a API real: se o repositório
 não possui issues ou PRs, os respectivos indicadores ficam vazios/zerados.
 
+Para o perfil de servidor Oracle, consulte o [guia de deploy](docs/oracle-deploy.md).
+
 ## Primeiros passos
 
 Pré-requisitos: Python 3.12 ou superior com `venv` e `pip`, Docker Engine em execução,
