@@ -12,6 +12,7 @@ services:
       MB_DB_DBNAME: gitlog_metabase
       MB_DB_USER: gitlog_metabase_app
       MB_SITE_URL: ${METABASE_SITE_URL:-https://gitlog.leofe.com.br}
+      MB_ENCRYPTION_SECRET_KEY: ${MB_ENCRYPTION_SECRET_KEY:?Set MB_ENCRYPTION_SECRET_KEY in .env}
       JAVA_OPTS: -Xmx384m -XX:+UseSerialGC -XX:ActiveProcessorCount=2
     ports: !reset []
     depends_on: !reset []

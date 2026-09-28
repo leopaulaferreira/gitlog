@@ -7,7 +7,8 @@ de 640 MiB; não publica uma porta no host. O Nginx existente deverá encaminhar
 `gitlog.leofe.com.br` para o serviço `metabase:3000` na rede Docker.
 
 Crie `.env` a partir de `.env.example`, troque as senhas e configure
-`METABASE_SITE_URL=https://gitlog.leofe.com.br`. O setup usa uma role dedicada do
+`METABASE_SITE_URL=https://gitlog.leofe.com.br` e gere uma chave fixa
+`MB_ENCRYPTION_SECRET_KEY` com pelo menos 16 caracteres. O setup usa uma role dedicada do
 PostgreSQL já existente. Não publique a porta 5432.
 
 ```bash
