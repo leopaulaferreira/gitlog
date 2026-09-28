@@ -5,5 +5,3 @@ where 1=1
 [[and {{repository}}]]
 [[and {{language}}]]
 [[and {{date_range}}]]
-
-
