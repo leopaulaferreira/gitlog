@@ -1,35 +1,35 @@
 # GitLog
 
-**Turning GitHub activity into structured data and actionable insights.**
+**Transformando a atividade do GitHub em dados estruturados e análises úteis.**
 
-## What is GitLog?
+## O que é o GitLog?
 
 GitLog é um projeto de portfólio de Engenharia de Dados e Software que irá
 transformar atividade real da API pública do GitHub em dados estruturados e análises.
 O desenvolvimento é incremental, com entregas executáveis e verificáveis.
 
-**Estado atual: Fases 6 e 7 — dbt e GitLog Analytics no Metabase.** A ingestão
+**Estado atual: Fases 6 e 7 — dbt e GitLog — Análises no Metabase.** A ingestão
 real de repositories, commits, issues e PRs preserva JSON, valida dados e carrega
 PostgreSQL com UPSERT, auditoria e checkpoints. O dbt gera dimensões e fatos; o
 Metabase apresenta métricas sobre os repositórios monitorados, com filtros.
 
-## Architecture
+## Arquitetura
 
 O fluxo abaixo está implementado. Airflow, MinIO e Spring Boot permanecem futuros:
 
 ```mermaid
 flowchart LR
-    A[GitHub REST API] --> B[Python Ingestion]
-    B --> C[Raw JSON]
+    A[API REST do GitHub] --> B[Ingestão Python]
+    B --> C[JSON bruto]
     C --> D[PostgreSQL]
     D --> E[dbt]
-    E --> F[Analytics Layer]
+    E --> F[Camada analítica]
     F --> G[Metabase]
 ```
 
 Detalhes e limites de cada etapa: [arquitetura](docs/architecture.md).
 
-## Tech Stack
+## Tecnologias
 
 | Camada | Tecnologia | Estado |
 | --- | --- | --- |
@@ -40,10 +40,10 @@ Detalhes e limites de cada etapa: [arquitetura](docs/architecture.md).
 | Validação / configuração do pipeline | Pydantic, python-dotenv | Implementado |
 | Persistência | Psycopg 3, migrações SQL | Repositories, commits, issues, PRs, checkpoints e auditoria |
 | Transformação | dbt Core 1.12.5 + dbt-postgres 1.11.0 | 12 models, documentação e testes |
-| Visualização | Metabase 0.63.18 | GitLog Analytics com 14 cards e filtros |
+| Visualização | Metabase 0.63.18 | GitLog — Análises com 14 cards e filtros |
 | Orquestração / data lake | Airflow, MinIO | Fases posteriores |
 
-## Features
+## Funcionalidades
 
 - Pacote instalável em ambiente virtual, com comandos de ajuda e versão.
 - PostgreSQL com healthcheck, volume persistente e porta limitada ao localhost.
@@ -59,7 +59,7 @@ Detalhes e limites de cada etapa: [arquitetura](docs/architecture.md).
 - Issues abertas/fechadas e PRs abertos/fechados/merged com identidade correta,
   snapshots completos e atualização incremental por entidade e repositório.
 
-## Data Pipeline
+## Pipeline de dados
 
 `gitlog repositories` executa `GitHub → Python → Raw JSON → PostgreSQL` para os
 repositórios configurados. `gitlog migrate` prepara o schema e a role de ingestão.
@@ -70,14 +70,14 @@ não exige uma execução prévia de `repositories`.
 independentes. `gitlog all` executa repositories, commits, issues e PRs nessa ordem.
 Consulte o [contrato do pipeline](docs/pipeline.md).
 
-## Data Quality
+## Qualidade dos dados
 
 IDs, estados, timestamps, SHAs e campos obrigatórios são validados antes da carga.
 Constraints e foreign keys protegem unicidade e referências no PostgreSQL. A migração
 004 fortalece essas regras sem apagar dados inválidos: aplique com `make migrate`.
 A separação entre issues e PRs continua respeitando o marcador `pull_request` da API.
 
-## Fault Tolerance
+## Tolerância a falhas
 
 Cada repositório/entidade confirma dados, checkpoint e auditoria juntos. Uma falha
 reverte essa unidade e permite continuar nas outras; o checkpoint anterior permanece.
@@ -85,7 +85,7 @@ Perda de conexão que impeça confirmar a auditoria interrompe o comando. Execu�
 pendentes ficam visíveis, sem reset automático. Retries e rate limit reutilizam
 `GitHubClient`. Veja a [estratégia de recuperação](docs/pipeline.md#falhas-e-recuperação).
 
-## Observability
+## Observabilidade
 
 Logs JSON correlacionam repositório, entidade e run ID, inclusive nos retries.
 Cada carga produz resumo com status, extraídos, carregados, ignorados e duração.
@@ -101,7 +101,7 @@ O comando mostra última execução, pipelines já executados, checkpoints e aud
 pendentes. Usa somente PostgreSQL e não exige token GitHub. Um código 0 indica
 consulta concluída, não ausência de falhas nos pipelines.
 
-## Idempotency
+## Idempotência
 
 Repositories usa ID GitHub; commits usa repository ID + SHA; issues e PRs usam
 seus IDs próprios e unicidade por repository ID + number. UPSERT evita duplicação;
@@ -113,7 +113,7 @@ O [contrato do pipeline](docs/pipeline.md) explica métricas, checkpoints, retri
 constraints e limites. Execute `make coverage` para medir linhas e branches das
 suítes unitária e PostgreSQL, sem meta artificial de 100%.
 
-## Analytics Layer
+## Camada analítica
 
 O projeto [`dbt/`](dbt/) lê as quatro fontes raw e produz views em `staging` e
 `intermediate`, e tabelas em `analytics`. Datas são normalizadas para UTC; valores
@@ -133,7 +133,7 @@ verificam unicidade, campos obrigatórios, relacionamentos, valores permitidos e
 reconciliação de métricas. Há testes unitários para UTC, commits sem data, PRs
 merged e preenchimento diário. [Operação e limites](docs/analytics.md).
 
-## Data Model
+## Modelo de dados
 
 O schema `raw` mantém repositories, commits, issues, pull_requests, checkpoints e
 pipeline_runs. O schema `analytics` contém:
@@ -152,7 +152,7 @@ média ponderável de horas até merge. Stars/forks ficam somente no snapshot at
 não há histórico inventado, dimensão artificial de contributors ou Activity Score.
 Veja os campos, chaves e o [diagrama Mermaid dimensional](docs/data-model.md).
 
-## Quick Demo
+## Demonstração rápida
 
 Pré-requisitos: Docker/Compose em execução, Python 3.12+ e Make. Para uma nova instalação:
 
@@ -179,14 +179,14 @@ A primeira inicialização do Metabase pode levar alguns minutos. Aguarde
 `docker compose ps` mostrar healthy antes de `dashboard-setup`.
 Abra **http://localhost:3000**, entre com `METABASE_ADMIN_EMAIL` e a senha
 `METABASE_ADMIN_PASSWORD` guardada no `.env`, e abra a coleção/dashboard
-**GitLog Analytics**. O setup imprime o link exato, sem imprimir a senha.
+**GitLog — Análises**. O setup imprime o link exato, sem imprimir a senha.
 
 Para atualizar uma instalação existente, preserve seu `.env` e suas senhas;
 `make demo-config` preenche apenas senhas ausentes/de exemplo. Não sobrescreva
 credenciais de volumes existentes. A demonstração usa a API real: se o repositório
 não possui issues ou PRs, os respectivos indicadores ficam vazios/zerados.
 
-## Getting Started
+## Primeiros passos
 
 Pré-requisitos: Python 3.12 ou superior com `venv` e `pip`, Docker Engine em execução,
 Docker Compose v2+ e GNU Make. Os comandos abaixo pressupõem Linux, macOS ou WSL.
@@ -215,7 +215,7 @@ O token pode permanecer vazio para setup, ajuda, testes, PostgreSQL e migraçõe
 `make run` consulta a API real e grava snapshots e dados no PostgreSQL.
 Para mostrar somente a ajuda, execute `.venv/bin/gitlog --help`.
 
-## Environment Variables
+## Variáveis de ambiente
 
 | Variável | Uso |
 | --- | --- |
@@ -249,7 +249,7 @@ migrações. `make migrate` provisiona uma role separada com `USAGE` no schema `
 e `SELECT`, `INSERT`, `UPDATE` nas sete tabelas. A ingestão usa essa role.
 Essa configuração não é uma implantação de produção.
 
-## Running locally
+## Execução local
 
 ```bash
 make up                  # Inicia PostgreSQL, Metabase e seu banco interno
@@ -272,7 +272,7 @@ As variáveis de inicialização só criam usuário, senha e banco quando o volu
 vazio; mudar `.env` não altera as credenciais de um banco já inicializado.
 Não use `docker compose down -v` se precisar preservar os dados.
 
-### Using the GitHub client
+### Uso do cliente GitHub
 
 Exemplo Python, após definir `GITHUB_TOKEN` no ambiente e executar `make setup`:
 
@@ -288,7 +288,7 @@ O exemplo consulta a API real e retorna JSON em memória. Não grava arquivos ne
 tabelas. A API pública, parâmetros, política de retry e exemplos de paginação estão
 documentados em [GitHub API Client](docs/github-client.md).
 
-## Running tests
+## Execução dos testes
 
 ```bash
 make test
@@ -322,12 +322,12 @@ Os testes de issues/PRs cobrem páginas mistas, ID de issue diferente do ID de P
 estados aberto/fechado/merged, repetição sem duplicação, atualização de registros,
 checkpoints separados, falhas de raw/SQL/paginação e preservação da Fase 3 na migração.
 
-## Dashboard
+## Painel
 
-**GitLog Analytics** disponibiliza analytics dos repositórios monitorados via
-Metabase. São 14 cards: seis KPIs, séries de commits/issues/PRs, ranking por commits,
+**GitLog — Análises** disponibiliza analytics dos repositórios monitorados via
+Metabase em português brasileiro. São 14 cards: seis KPIs, séries de commits/issues/PRs, ranking por commits,
 tempo de merge, atividade por repositório, linguagens atuais e comparação entre
-repositórios. Os filtros são repository, date range (UTC) e current language.
+repositórios. Os filtros são Repositório, Período (UTC) e Linguagem atual.
 
 `make dashboard-setup` cria a conexão de leitura, a coleção, as perguntas e o
 layout de forma repetível. `make dashboard-check` executa consultas e filtros reais
@@ -339,7 +339,7 @@ consulte [instruções de captura](docs/images/README.md). Nenhuma captura fict�
 foi gerada. A camada visual consome os marts dbt, sem reproduzir a transformação
 ou usar fixtures como dados da demonstração.
 
-## Incremental Loading
+## Carga incremental
 
 Commits fixam o SHA da branch padrão antes de paginar. A primeira execução lê
 todo o histórico; a próxima compara o checkpoint com a nova ponta. Datas antigas
@@ -355,7 +355,7 @@ preservados mesmo após force-push. A carga cobre a branch padrão, não todas a
 `records_loaded` conta commits distintos inseridos ou efetivamente atualizados.
 Registros idênticos não são regravados. Veja a [decisão de incremental](docs/decisions/ADR-003-incremental-commits.md).
 
-### Issues e Pull Requests
+### Questões e solicitações de alteração
 
 ```bash
 source .venv/bin/activate
@@ -392,7 +392,7 @@ individual auditável não impede os pipelines seguintes. O comando retorna 1 se
 houver qualquer falha e 0 se todos terminarem com sucesso. `all` não executa
 migrações automaticamente. Detalhes e limites: [Issues e PRs](docs/issues-pull-requests.md).
 
-## Project Structure
+## Estrutura do projeto
 
 ```text
 gitlog/
@@ -446,7 +446,7 @@ gitlog/
 
 Airflow, MinIO, Spring Boot e workflows de CI não fazem parte desta entrega.
 
-## Roadmap
+## Etapas do projeto
 
 - [x] Fase 0: bootstrap Python, qualidade, documentação e PostgreSQL local.
 - [x] Fase 1: GitHub API Client — autenticação, paginação, timeout, rate limit e retries.
@@ -455,7 +455,7 @@ Airflow, MinIO, Spring Boot e workflows de CI não fazem parte desta entrega.
 - [x] Fase 4: issues e pull requests.
 - [x] Fase 5: qualidade, auditoria, status e recuperação documentada de falhas.
 - [x] Fase 6: dbt — staging, dimensões, fatos e testes.
-- [x] Fase 7: GitLog Analytics no Metabase; sem inventar contributors ou histórico.
+- [x] Fase 7: GitLog — Análises no Metabase; sem inventar contributors ou histórico.
 - [ ] Fase 8: Airflow.
 - [ ] Fase 9: MinIO.
 - [ ] Fase 10: CI/CD com GitHub Actions.
@@ -465,14 +465,14 @@ Airflow, MinIO, Spring Boot e workflows de CI não fazem parte desta entrega.
 Checkpoints, constraints e rastreabilidade necessários ao MVP foram
 implementados nas fases 2–3; a Fase 5 amplia essas garantias.
 
-## Future Improvements
+## Melhorias futuras
 
 Activity Score com fórmula documentada antes da implementação; releases, tags,
 branches, workflows e deployments. Kafka, Spark, AWS S3/Glue/Athena/Redshift,
 BigQuery, Databricks, Terraform e Kubernetes são possibilidades a avaliar,
 sem compromisso de adoção ou implementação antecipada.
 
-## License
+## Licença
 
 Licença ainda não definida. Uma licença explícita deverá ser escolhida antes de
 distribuir o projeto como software open source.

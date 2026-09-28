@@ -1,7 +1,7 @@
 # Pipeline: confiabilidade e operação
 
 Após a ingestão descrita aqui, as Fases 6–7 executam [dbt](analytics.md) e
-[GitLog Analytics no Metabase](dashboard.md). A confiabilidade da ingestão
+[GitLog — Análises no Metabase](dashboard.md). A confiabilidade da ingestão
 continua com as garantias abaixo.
 
 A Fase 5 aprimora os quatro pipelines existentes: `repositories`, `commits`,

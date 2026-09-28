@@ -45,13 +45,13 @@ H2 embarcado nem reutiliza o banco operacional como banco interno.
 
 ```mermaid
 flowchart LR
-    A[GitHub REST API] --> B[Python Ingestion]
-    B --> C[Raw JSON]
+    A[API REST do GitHub] --> B[Ingestão Python]
+    B --> C[JSON bruto]
     C --> D[PostgreSQL]
     D --> E[dbt]
-    E --> F[Analytics Layer]
+    E --> F[Camada analítica]
     F --> G[Metabase]
-    G --> H[(Metabase application DB)]
+    G --> H[(Banco interno do Metabase)]
 ```
 
 Definições versionadas em dashboard/cards.json e SQL são aplicadas pela API da
