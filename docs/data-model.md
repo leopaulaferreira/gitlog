@@ -1,6 +1,6 @@
 # Modelo de dados
 
-**Estado: Fase 5.** A migração `001_repositories.sql` cria o schema `raw` com
+**Estado: Fases 6–7.** A migração `001_repositories.sql` cria o schema `raw` com
 repositories e auditoria; `002_commits.sql` adiciona commits e checkpoints;
 `003_issues_pull_requests.sql` adiciona issues, PRs e seus checkpoints temporais.
 `004_quality_observability.sql` reforça integridade e adiciona métricas de execução.
@@ -106,16 +106,70 @@ Há índices por repository ID e data de atualização.
 `updated_at` e `pipeline_run_id`; a PK composta separa Issues e PRs. Commits
 mantêm seu checkpoint por SHA na tabela original. [Fluxo e garantias](issues-pull-requests.md).
 
-## Camadas posteriores
+## Camada analítica dbt
 
-- `raw`: dados próximos da origem, com IDs e metadados de ingestão.
-- `staging`: dados limpos e tipados pelo dbt.
-- `analytics`: `dim_repository`, `dim_contributor`, `dim_date`, `fact_commits`,
-  `fact_issues`, `fact_pull_requests` e `fact_repository_daily_metrics`.
+Os modelos staging e intermediate são views nos schemas homônimos. Os marts são
+tabelas no schema `analytics`. Veja [execução e contratos](analytics.md).
 
-Stars e forks históricos dependem de snapshots coletados ao longo do tempo;
-o estado atual de um repositório não reconstrói sua série histórica.
-O Activity Score só será criado após definição explícita de fórmula, pesos e janela.
+| Model | Granularidade | Conteúdo |
+| --- | --- | --- |
+| `stg_github_repositories` | ID do repositório | Atributos atuais e timestamps UTC |
+| `stg_github_commits` | repository + SHA | Identidade, login opcional e data do commit com proveniência |
+| `stg_github_issues` | ID de issue | Estado, criação, fechamento e comentários |
+| `stg_github_pull_requests` | ID de PR | Estado, draft, criação, fechamento e merge |
+| `int_repository_events` | Evento observado | Commit, abertura, último fechamento e merge |
+| `int_repository_date_bounds` | Repositório | Limites do calendário por repositório |
+| `dim_repository` | Repositório (tipo 1) | repository_key, github_repository_id, name, full_name, owner, primary_language, created_at, current_stars/current_forks |
+| `dim_date` | Data UTC | date_key YYYYMMDD, date_day, ano, trimestre, mês, semana/ano ISO, dia ISO e fim de semana |
+| `fact_commits` | repository + SHA | commit_key, repository_key, commit_timestamp, commit_date, timestamp_source, author_login, sha |
+| `fact_issues` | Issue | issue_key, repository_key, github_issue_id, issue_number, title, state, author_login, created/updated/closed, comments_count |
+| `fact_pull_requests` | PR | pull_request_key, repository_key, ID/número, título, state, author_login, datas, draft, merged, merge_commit_sha, merge_time_hours |
+| `fact_repository_daily_metrics` | repository + date | commit_count, issues_opened/closed, prs_opened/closed/merged, soma e média de horas até merge |
+
+As datas de fatos se relacionam a `dim_date.date_day`; a tabela diária também
+contém `date_key`. Datas de fechamento/merge são opcionais; um commit pode não ter
+nenhuma data disponível. `repository_key` reutiliza o ID estável do GitHub, sem
+hash artificial. Stars/forks atuais não permitem uma série histórica. Linguagem
+é o atributo atual, inclusive quando usado como filtro de eventos antigos.
+
+```mermaid
+erDiagram
+    dim_repository ||--o{ fact_commits : repository_key
+    dim_repository ||--o{ fact_issues : repository_key
+    dim_repository ||--o{ fact_pull_requests : repository_key
+    dim_repository ||--o{ fact_repository_daily_metrics : repository_key
+    dim_date ||--o{ fact_commits : commit_date
+    dim_date ||--o{ fact_issues : created_and_closed_dates
+    dim_date ||--o{ fact_pull_requests : created_closed_merged_dates
+    dim_date ||--o{ fact_repository_daily_metrics : date_key
+    dim_repository {
+        bigint repository_key PK
+        bigint github_repository_id
+        text full_name
+        text primary_language
+    }
+    dim_date {
+        int date_key PK
+        date date_day UK
+    }
+    fact_repository_daily_metrics {
+        text repository_date_key PK
+        bigint repository_key FK
+        int date_key FK
+        bigint commit_count
+        bigint issues_opened
+        bigint issues_closed
+        bigint prs_opened
+        bigint prs_closed
+        bigint prs_merged
+        numeric average_pr_merge_time_hours
+    }
+```
+
+As relações são testadas pelo dbt; não são foreign keys físicas criadas pelo dbt.
+Os schemas raw continuam com suas constraints PostgreSQL. A métrica de média
+considera somente PRs efetivamente merged e usa horas corridas. Mudanças de estado
+intermediárias e exclusões não podem ser reconstruídas de snapshots atuais.
 
 ## Garantias adicionadas na Fase 5
 

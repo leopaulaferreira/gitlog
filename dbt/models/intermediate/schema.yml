@@ -1,0 +1,23 @@
+version: 2
+models:
+  - name: int_repository_events
+    description: Union of dated commits, issue creation/latest closure and PR creation/latest closure/merge. A merged PR can produce both closure and merge events; these are separate metrics, not additive activity scores.
+    columns:
+      - name: repository_key
+        data_tests: [not_null]
+      - name: event_date
+        data_tests: [not_null]
+      - name: event_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [commit, issue_opened, issue_closed, pr_opened, pr_closed, pr_merged]
+  - name: int_repository_date_bounds
+    description: Per-repository date domain, including inherited commits older than repository creation and all observed events through today.
+    columns:
+      - name: repository_key
+        data_tests: [unique, not_null]
+      - name: first_date
+        data_tests: [not_null]
+      - name: last_date
+        data_tests: [not_null]

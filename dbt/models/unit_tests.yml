@@ -1,0 +1,57 @@
+version: 2
+unit_tests:
+  - name: commit_times_use_utc_and_preserve_missing
+    model: stg_github_commits
+    given:
+      - input: source('github', 'commits')
+        format: sql
+        rows: |
+          select 1::bigint as repository_id, 'a'::text as sha, '  alice '::text as author_login,
+                 '2026-09-02 00:30:00+02'::timestamptz as committed_at,
+                 '2026-08-01 12:00:00+00'::timestamptz as authored_at
+          union all select 1, 'b', '', null, '2026-09-03 10:00:00-03'::timestamptz
+          union all select 1, 'c', null, null, null
+    expect:
+      rows:
+        - {sha: a, author_login: alice, commit_timestamp: '2026-09-01 22:30:00', timestamp_source: committer}
+        - {sha: b, author_login: null, commit_timestamp: '2026-09-03 13:00:00', timestamp_source: author}
+        - {sha: c, author_login: null, commit_timestamp: null, timestamp_source: missing}
+  - name: merge_duration_only_for_merged_prs
+    model: fact_pull_requests
+    given:
+      - input: ref('dim_repository')
+        rows: [{repository_key: 1, github_repository_id: 1}]
+      - input: ref('stg_github_pull_requests')
+        rows:
+          - {github_pull_request_id: 1, github_repository_id: 1, state: closed, created_at: '2026-09-01 00:00:00', merged_at: '2026-09-02 12:00:00'}
+          - {github_pull_request_id: 2, github_repository_id: 1, state: open, created_at: '2026-09-01 00:00:00', merged_at: null}
+          - {github_pull_request_id: 3, github_repository_id: 1, state: closed, created_at: '2026-09-01 00:00:00', merged_at: null}
+    expect:
+      rows:
+        - {github_pull_request_id: 1, is_merged: true, merge_time_hours: '36.0000000000000000'}
+        - {github_pull_request_id: 2, is_merged: false, merge_time_hours: null}
+        - {github_pull_request_id: 3, is_merged: false, merge_time_hours: null}
+  - name: daily_counts_zero_fill_and_weighted_merge_inputs
+    model: fact_repository_daily_metrics
+    given:
+      - input: ref('int_repository_date_bounds')
+        rows:
+          - {repository_key: 1, first_date: '2026-09-01', last_date: '2026-09-02'}
+          - {repository_key: 2, first_date: '2026-09-02', last_date: '2026-09-02'}
+      - input: ref('dim_date')
+        rows:
+          - {date_key: 20260901, date_day: '2026-09-01'}
+          - {date_key: 20260902, date_day: '2026-09-02'}
+      - input: ref('int_repository_events')
+        rows:
+          - {repository_key: 1, event_date: '2026-09-01', event_type: commit}
+          - {repository_key: 1, event_date: '2026-09-01', event_type: issue_opened}
+          - {repository_key: 1, event_date: '2026-09-01', event_type: pr_merged, merge_time_hours: 2}
+          - {repository_key: 1, event_date: '2026-09-01', event_type: pr_merged, merge_time_hours: 10}
+          - {repository_key: 1, event_date: '2026-09-01', event_type: pr_closed}
+          - {repository_key: 1, event_date: '2026-09-01', event_type: pr_closed}
+    expect:
+      rows:
+        - {repository_key: 1, activity_date: '2026-09-01', commit_count: 1, issues_opened: 1, prs_closed: 2, prs_merged: 2, pr_merge_time_hours_sum: 12, average_pr_merge_time_hours: '6.0000000000000000'}
+        - {repository_key: 1, activity_date: '2026-09-02', commit_count: 0, issues_opened: 0, prs_closed: 0, prs_merged: 0, pr_merge_time_hours_sum: 0, average_pr_merge_time_hours: null}
+        - {repository_key: 2, activity_date: '2026-09-02', commit_count: 0, issues_opened: 0, prs_closed: 0, prs_merged: 0, pr_merge_time_hours_sum: 0, average_pr_merge_time_hours: null}

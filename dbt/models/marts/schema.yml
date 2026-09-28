@@ -1,0 +1,356 @@
+version: 2
+models:
+  - name: dim_repository
+    description: "Type 1 current repository dimension; stable numeric key equals GitHub ID."
+    columns:
+      - name: repository_key
+        description: "Stable numeric dimension key."
+        data_tests:
+          - unique
+          - not_null
+      - name: github_repository_id
+        description: "Stable GitHub repository ID."
+        data_tests:
+          - unique
+          - not_null
+      - name: name
+        description: "Current repository name."
+        data_tests:
+          - not_null
+      - name: full_name
+        description: "Current owner/name."
+        data_tests:
+          - not_null
+      - name: owner
+        description: "Current owner login."
+        data_tests:
+          - not_null
+      - name: primary_language
+        description: "Current GitHub primary language; null when unknown."
+      - name: created_at
+        description: "Source creation timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: updated_at
+        description: "Source update timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: observed_at
+        description: "Most recent metadata observation, not historical metrics."
+        data_tests:
+          - not_null
+      - name: current_stars
+        description: "Current star count; no historical series."
+        data_tests:
+          - not_null
+      - name: current_forks
+        description: "Current fork count; no historical series."
+        data_tests:
+          - not_null
+      - name: is_archived
+        description: "Current archive flag."
+        data_tests:
+          - not_null
+      - name: visibility
+        description: "Current visibility."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["public", "private", "internal"]
+  - name: dim_date
+    description: "Contiguous UTC calendar covering creation/events through today, including future source dates."
+    columns:
+      - name: date_key
+        description: "Integer YYYYMMDD date key."
+        data_tests:
+          - unique
+          - not_null
+      - name: date_day
+        description: "Calendar date."
+        data_tests:
+          - unique
+          - not_null
+      - name: year
+        description: "Calendar year."
+        data_tests:
+          - not_null
+      - name: quarter
+        description: "Calendar quarter."
+        data_tests:
+          - not_null
+      - name: month
+        description: "Calendar month."
+        data_tests:
+          - not_null
+      - name: iso_year
+        description: "ISO week year."
+        data_tests:
+          - not_null
+      - name: iso_week
+        description: "ISO week number."
+        data_tests:
+          - not_null
+      - name: day_of_week
+        description: "ISO day: Monday=1, Sunday=7."
+        data_tests:
+          - not_null
+      - name: month_start
+        description: "First day of calendar month."
+        data_tests:
+          - not_null
+      - name: is_weekend
+        description: "Saturday or Sunday."
+        data_tests:
+          - not_null
+  - name: fact_commits
+    description: "One collected repository + SHA, including undated commits; only default-branch history is ingested."
+    columns:
+      - name: commit_key
+        description: "Collision-free repository ID + colon + SHA."
+        data_tests:
+          - unique
+          - not_null
+      - name: repository_key
+        description: "Repository dimension key."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "ref('dim_repository')"
+                field: "repository_key"
+      - name: commit_timestamp
+        description: "UTC committer time with author fallback; nullable."
+      - name: commit_date
+        description: "UTC event date; nullable and excluded from dated metrics when missing."
+        data_tests:
+          - relationships:
+              arguments:
+                to: "ref('dim_date')"
+                field: "date_day"
+      - name: author_login
+        description: "Nullable GitHub login, not a complete contributor identity."
+      - name: sha
+        description: "Git SHA within this repository."
+        data_tests:
+          - not_null
+      - name: timestamp_source
+        description: "Provenance of the chosen timestamp."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["committer", "author", "missing"]
+  - name: fact_issues
+    description: "One collected issue; latest source snapshot, not lifecycle event history."
+    columns:
+      - name: issue_key
+        description: "Entity-prefixed stable GitHub ID."
+        data_tests:
+          - unique
+          - not_null
+      - name: repository_key
+        description: "Repository dimension key."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "ref('dim_repository')"
+                field: "repository_key"
+      - name: github_issue_id
+        description: "Entity ID from its own GitHub endpoint."
+        data_tests:
+          - unique
+          - not_null
+      - name: issue_number
+        description: "Number scoped to the repository."
+        data_tests:
+          - not_null
+      - name: title
+        description: "Current title."
+        data_tests:
+          - not_null
+      - name: state
+        description: "Current state, not a state transition history."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["open", "closed"]
+      - name: author_login
+        description: "Nullable author login."
+      - name: created_at
+        description: "Creation timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: updated_at
+        description: "Source update timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: closed_at
+        description: "Latest available closure timestamp in UTC."
+      - name: comments_count
+        description: "Current number of comments."
+        data_tests:
+          - not_null
+      - name: created_date
+        description: "UTC created date."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "ref('dim_date')"
+                field: "date_day"
+      - name: closed_date
+        description: "UTC closed date."
+        data_tests:
+          - relationships:
+              arguments:
+                to: "ref('dim_date')"
+                field: "date_day"
+  - name: fact_pull_requests
+    description: "One collected pull_request; latest source snapshot, not lifecycle event history."
+    columns:
+      - name: pull_request_key
+        description: "Entity-prefixed stable GitHub ID."
+        data_tests:
+          - unique
+          - not_null
+      - name: repository_key
+        description: "Repository dimension key."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "ref('dim_repository')"
+                field: "repository_key"
+      - name: github_pull_request_id
+        description: "Entity ID from its own GitHub endpoint."
+        data_tests:
+          - unique
+          - not_null
+      - name: pull_request_number
+        description: "Number scoped to the repository."
+        data_tests:
+          - not_null
+      - name: title
+        description: "Current title."
+        data_tests:
+          - not_null
+      - name: state
+        description: "Current state, not a state transition history."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["open", "closed"]
+      - name: author_login
+        description: "Nullable author login."
+      - name: created_at
+        description: "Creation timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: updated_at
+        description: "Source update timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: closed_at
+        description: "Latest available closure timestamp in UTC."
+      - name: merged_at
+        description: "Merge timestamp in UTC; null for unmerged PRs."
+      - name: merge_commit_sha
+        description: "Nullable merge SHA; it need not occur on the collected branch."
+      - name: is_draft
+        description: "Current draft flag."
+        data_tests:
+          - not_null
+      - name: created_date
+        description: "UTC created date."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "ref('dim_date')"
+                field: "date_day"
+      - name: closed_date
+        description: "UTC closed date."
+        data_tests:
+          - relationships:
+              arguments:
+                to: "ref('dim_date')"
+                field: "date_day"
+      - name: merged_date
+        description: "UTC merged date."
+        data_tests:
+          - relationships:
+              arguments:
+                to: "ref('dim_date')"
+                field: "date_day"
+      - name: is_merged
+        description: "True only when merged_at is populated."
+        data_tests:
+          - not_null
+      - name: merge_time_hours
+        description: "Elapsed hours from creation to merge; null when unmerged. Not business hours."
+  - name: fact_repository_daily_metrics
+    description: "One row per repository + UTC date. Zeros mean no collected events, not guaranteed API completeness."
+    columns:
+      - name: repository_date_key
+        description: "Repository key + UTC date; unique grain."
+        data_tests:
+          - unique
+          - not_null
+      - name: repository_key
+        description: "Repository dimension key."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "ref('dim_repository')"
+                field: "repository_key"
+      - name: date_key
+        description: "Date dimension key."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "ref('dim_date')"
+                field: "date_key"
+      - name: activity_date
+        description: "UTC event date. Zero-filled for each repository observation domain."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "ref('dim_date')"
+                field: "date_day"
+      - name: commit_count
+        description: "Dated collected commits."
+        data_tests:
+          - not_null
+      - name: issues_opened
+        description: "Issues created on the date."
+        data_tests:
+          - not_null
+      - name: issues_closed
+        description: "Currently closed issues with their latest closure on the date."
+        data_tests:
+          - not_null
+      - name: prs_opened
+        description: "PRs created on the date."
+        data_tests:
+          - not_null
+      - name: prs_closed
+        description: "Currently closed PRs, including merged, with closure on the date."
+        data_tests:
+          - not_null
+      - name: prs_merged
+        description: "PRs merged on the date."
+        data_tests:
+          - not_null
+      - name: pr_merge_time_hours_sum
+        description: "Sum of elapsed merge hours for PRs merged on the date."
+        data_tests:
+          - not_null
+      - name: average_pr_merge_time_hours
+        description: "Merge-hour sum divided by merged PR count; null for no merges. Aggregate weighted by prs_merged."

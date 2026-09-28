@@ -1,0 +1,183 @@
+version: 2
+models:
+  - name: stg_github_repositories
+    description: "Current repository snapshot; timestamps normalized to UTC."
+    columns:
+      - name: github_repository_id
+        description: "Stable GitHub repository ID."
+        data_tests:
+          - unique
+          - not_null
+      - name: name
+        description: "Current repository name."
+        data_tests:
+          - not_null
+      - name: full_name
+        description: "Current owner/name."
+        data_tests:
+          - not_null
+      - name: owner
+        description: "Current owner login."
+        data_tests:
+          - not_null
+      - name: primary_language
+        description: "Current GitHub primary language; null when unknown."
+      - name: created_at
+        description: "Source creation timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: updated_at
+        description: "Source update timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: observed_at
+        description: "Most recent metadata observation, not historical metrics."
+        data_tests:
+          - not_null
+      - name: current_stars
+        description: "Current star count; no historical series."
+        data_tests:
+          - not_null
+      - name: current_forks
+        description: "Current fork count; no historical series."
+        data_tests:
+          - not_null
+      - name: is_archived
+        description: "Current archive flag."
+        data_tests:
+          - not_null
+      - name: visibility
+        description: "Current visibility."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["public", "private", "internal"]
+  - name: stg_github_commits
+    description: "One commit per repository and SHA; no manufactured dates or authors."
+    columns:
+      - name: github_repository_id
+        description: "Repository ID."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "ref('stg_github_repositories')"
+                field: "github_repository_id"
+      - name: sha
+        description: "Forty-character lowercase Git SHA."
+        data_tests:
+          - not_null
+      - name: author_login
+        description: "Nullable GitHub login."
+      - name: authored_at
+        description: "Nullable author time in UTC."
+      - name: committed_at
+        description: "Nullable committer time in UTC."
+      - name: commit_timestamp
+        description: "Committer time, then author time; null when both are absent."
+      - name: timestamp_source
+        description: "Provenance of the chosen timestamp."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["committer", "author", "missing"]
+  - name: stg_github_issues
+    description: "Current issues snapshot with source identity preserved."
+    columns:
+      - name: github_issue_id
+        description: "Entity ID from its own GitHub endpoint."
+        data_tests:
+          - unique
+          - not_null
+      - name: issue_number
+        description: "Number scoped to the repository."
+        data_tests:
+          - not_null
+      - name: github_repository_id
+        description: "Repository ID."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "ref('stg_github_repositories')"
+                field: "github_repository_id"
+      - name: title
+        description: "Current title."
+        data_tests:
+          - not_null
+      - name: state
+        description: "Current state, not a state transition history."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["open", "closed"]
+      - name: author_login
+        description: "Nullable author login."
+      - name: created_at
+        description: "Creation timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: updated_at
+        description: "Source update timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: closed_at
+        description: "Latest available closure timestamp in UTC."
+      - name: comments_count
+        description: "Current number of comments."
+        data_tests:
+          - not_null
+  - name: stg_github_pull_requests
+    description: "Current pull_requests snapshot with source identity preserved."
+    columns:
+      - name: github_pull_request_id
+        description: "Entity ID from its own GitHub endpoint."
+        data_tests:
+          - unique
+          - not_null
+      - name: pull_request_number
+        description: "Number scoped to the repository."
+        data_tests:
+          - not_null
+      - name: github_repository_id
+        description: "Repository ID."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "ref('stg_github_repositories')"
+                field: "github_repository_id"
+      - name: title
+        description: "Current title."
+        data_tests:
+          - not_null
+      - name: state
+        description: "Current state, not a state transition history."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["open", "closed"]
+      - name: author_login
+        description: "Nullable author login."
+      - name: created_at
+        description: "Creation timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: updated_at
+        description: "Source update timestamp in UTC."
+        data_tests:
+          - not_null
+      - name: closed_at
+        description: "Latest available closure timestamp in UTC."
+      - name: merged_at
+        description: "Merge timestamp in UTC; null for unmerged PRs."
+      - name: merge_commit_sha
+        description: "Nullable merge SHA; it need not occur on the collected branch."
+      - name: is_draft
+        description: "Current draft flag."
+        data_tests:
+          - not_null

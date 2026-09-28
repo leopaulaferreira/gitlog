@@ -1,0 +1,28 @@
+version: 2
+sources:
+  - name: github
+    schema: raw
+    description: GitHub snapshots loaded by the Python ingestion pipelines. No synthetic records.
+    tables:
+      - name: repositories
+        description: Current repository metadata; stars and forks are snapshots.
+        columns:
+          - name: id
+            data_tests: [unique, not_null]
+      - name: commits
+        description: Collected commits keyed by repository_id and SHA, including nullable Git identity fields.
+        columns:
+          - name: repository_id
+            data_tests: [not_null]
+          - name: sha
+            data_tests: [not_null]
+      - name: issues
+        description: Issues only; records with the pull_request marker are excluded by ingestion.
+        columns:
+          - name: id
+            data_tests: [unique, not_null]
+      - name: pull_requests
+        description: Hydrated pull request responses with their own IDs and merge metadata.
+        columns:
+          - name: id
+            data_tests: [unique, not_null]
