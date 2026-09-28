@@ -49,8 +49,23 @@ def main() -> int:
                 "password": secrets.token_urlsafe(24),
             }
         )
+        runner = (
+            [
+                sys.executable,
+                "-m",
+                "coverage",
+                "run",
+                "--append",
+                "--branch",
+                "--source=ingestion",
+                "-m",
+                "pytest",
+            ]
+            if "--coverage" in sys.argv[1:]
+            else [sys.executable, "-m", "pytest"]
+        )
         return subprocess.run(
-            [sys.executable, "-m", "pytest", "-m", "integration", "-q"],
+            [*runner, "-m", "integration", "-q"],
             env=env,
             cwd=root,
             check=False,

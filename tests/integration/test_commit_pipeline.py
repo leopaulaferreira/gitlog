@@ -411,3 +411,28 @@ def test_audit_start_failure_prevents_api_calls(pipeline, monkeypatch):
     with pytest.raises(OSError):
         service.run((NAME,))
     assert state.requests == []
+
+
+def test_incomplete_history_without_pinned_head_does_not_advance(pipeline, writer):
+    service, state = pipeline
+    assert service.run((NAME,)) == 0
+    original = checkpoint(writer)
+    state.head = "c" * 40
+    state.delta = [{**deepcopy(state.history[0]), "sha": "b" * 40}]
+    assert service.run((NAME,)) == 1
+    assert checkpoint(writer) == original
+    assert count(writer) == 1
+    assert service.summaries[0]["error_type"] == "GitHubPaginationError"
+
+
+@pytest.mark.parametrize("total", [True, -1, "2"])
+def test_invalid_compare_total_preserves_checkpoint(pipeline, writer, total):
+    service, state = pipeline
+    assert service.run((NAME,)) == 0
+    original = checkpoint(writer)
+    state.head = "b" * 40
+    state.delta = [{**deepcopy(state.history[0]), "sha": state.head}]
+    state.total = total
+    assert service.run((NAME,)) == 1
+    assert checkpoint(writer) == original
+    assert count(writer) == 1
