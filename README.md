@@ -8,7 +8,7 @@ GitLog é um projeto de portfólio de Engenharia de Dados e Software que irá
 transformar atividade real da API pública do GitHub em dados estruturados e análises.
 O desenvolvimento é incremental, com entregas executáveis e verificáveis.
 
-**Estado atual: Fase 4 — repositories, commits, issues e pull requests.** O pipeline consulta
+**Estado atual: Fase 5 — confiabilidade, qualidade e observabilidade.** O pipeline consulta
 a API real, preserva JSON por página, valida os campos e faz UPSERT no PostgreSQL
 com auditoria por execução. Commits usam checkpoint por repositório, deduplicação
 por repository ID + SHA e paginação com rate limit e retries. Issues e PRs têm
@@ -71,6 +71,49 @@ não exige uma execução prévia de `repositories`.
 `gitlog issues` e `gitlog pull-requests` carregam as novas entidades com checkpoints
 independentes. `gitlog all` executa repositories, commits, issues e PRs nessa ordem.
 Consulte o [contrato do pipeline](docs/pipeline.md).
+
+## Data Quality
+
+IDs, estados, timestamps, SHAs e campos obrigatórios são validados antes da carga.
+Constraints e foreign keys protegem unicidade e referências no PostgreSQL. A migração
+004 fortalece essas regras sem apagar dados inválidos: aplique com `make migrate`.
+A separação entre issues e PRs continua respeitando o marcador `pull_request` da API.
+
+## Fault Tolerance
+
+Cada repositório/entidade confirma dados, checkpoint e auditoria juntos. Uma falha
+reverte essa unidade e permite continuar nas outras; o checkpoint anterior permanece.
+Perda de conexão que impeça confirmar a auditoria interrompe o comando. Execuções
+pendentes ficam visíveis, sem reset automático. Retries e rate limit reutilizam
+`GitHubClient`. Veja a [estratégia de recuperação](docs/pipeline.md#falhas-e-recuperação).
+
+## Observability
+
+Logs JSON correlacionam repositório, entidade e run ID, inclusive nos retries.
+Cada carga produz resumo com status, extraídos, carregados, ignorados e duração.
+`pipeline_runs` agora inclui `duration_ms` e `records_skipped`; este último conta
+releituras/duplicatas somente em sucesso, sem classificar rollback como skip.
+
+```bash
+python -m ingestion.main status
+python -m ingestion.main status --json
+```
+
+O comando mostra última execução, pipelines já executados, checkpoints e auditorias
+pendentes. Usa somente PostgreSQL e não exige token GitHub. Um código 0 indica
+consulta concluída, não ausência de falhas nos pipelines.
+
+## Idempotency
+
+Repositories usa ID GitHub; commits usa repository ID + SHA; issues e PRs usam
+seus IDs próprios e unicidade por repository ID + number. UPSERT evita duplicação;
+releituras idênticas não aumentam `records_loaded`. A sobreposição incremental é
+segura e checkpoints só avançam após sucesso. Cada tentativa preserva auditoria e
+raw próprios. `status` também detecta sobreposições conceituais entre issues e PRs.
+
+O [contrato do pipeline](docs/pipeline.md) explica métricas, checkpoints, retries,
+constraints e limites. Execute `make coverage` para medir linhas e branches das
+suítes unitária e PostgreSQL, sem meta artificial de 100%.
 
 ## Data Model
 
@@ -180,6 +223,7 @@ documentados em [GitHub API Client](docs/github-client.md).
 ```bash
 make test
 make test-integration    # PostgreSQL temporário; GitHub continua simulado
+make coverage            # Mede linhas e branches das duas suítes
 make lint
 make format-check
 make check               # Lint, formatação e testes
@@ -210,13 +254,6 @@ checkpoints separados, falhas de raw/SQL/paginação e preservação da Fase 3 n
 
 **GitLog Analytics** será desenvolvido no Metabase na Fase 7, depois de validar
 o pipeline e a camada analítica. Nenhuma métrica de demonstração foi criada.
-
-## Data Quality
-
-O cliente valida JSON e o formato das páginas. Pydantic valida identidade,
-contagens, flags e timestamps com fuso; o PostgreSQL aplica constraints e chave
-primária pelo ID do GitHub. O JSON é preservado antes da validação de domínio.
-Testes de qualidade dbt serão adicionados com a camada de transformação.
 
 ## Incremental Loading
 
@@ -330,7 +367,7 @@ essas etapas forem implementadas.
 - [x] Fase 2: repositories — API → Raw JSON → PostgreSQL.
 - [x] Fase 3: commits — paginação, incremental e idempotência; validação do MVP.
 - [x] Fase 4: issues e pull requests.
-- [ ] Fase 5: ampliar qualidade, auditoria e recuperação de falhas.
+- [x] Fase 5: qualidade, auditoria, status e recuperação documentada de falhas.
 - [ ] Fase 6: dbt — staging, dimensões, fatos e testes.
 - [ ] Fase 7: dashboard Metabase; incluir contributors/languages antes dos KPIs dependentes.
 - [ ] Fase 8: Airflow.

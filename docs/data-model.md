@@ -1,8 +1,9 @@
 # Modelo de dados
 
-**Estado: Fase 4.** A migração `001_repositories.sql` cria o schema `raw` com
+**Estado: Fase 5.** A migração `001_repositories.sql` cria o schema `raw` com
 repositories e auditoria; `002_commits.sql` adiciona commits e checkpoints;
 `003_issues_pull_requests.sql` adiciona issues, PRs e seus checkpoints temporais.
+`004_quality_observability.sql` reforça integridade e adiciona métricas de execução.
 `public.gitlog_schema_migrations` registra nome,
 checksum SHA-256 e data de aplicação de cada migração.
 
@@ -28,7 +29,7 @@ mantém a identidade; `full_name` possui índice, sem unicidade. O estado atual 
 | `created_at`, `updated_at`, `pushed_at` | Timestamps com fuso; somente `pushed_at` aceita nulo |
 | `stars`, `forks`, `watchers`, `open_issues` | Bigints não negativos |
 | `default_branch`, `archived`, `visibility` | Obrigatórios; visibilidade public/private/internal |
-| `ingested_at`, `raw_path`, `pipeline_run_id` | Rastreiam extração, snapshot e execução; FK para `pipeline_runs` |
+| `ingested_at`, `raw_path`, `pipeline_run_id` | Última observação, snapshot e auditoria da última mudança; FK para `pipeline_runs` |
 
 O modelo mapeia `owner.login`, `stargazers_count`, `forks_count`,
 `subscribers_count` e `open_issues_count`. `watchers` usa `subscribers_count`.
@@ -38,7 +39,10 @@ Campos desconhecidos permanecem no snapshot original e são ignorados pelo model
 
 Cada tentativa de ingestão de um repositório recebe um UUID e registra
 `pipeline_name`, `repository`, `started_at`, `finished_at`, `status`,
-`records_extracted`, `records_loaded`, `raw_path` e `error_message`.
+`records_extracted`, `records_loaded`, `records_skipped`, `duration_ms`, `raw_path`
+e `error_message`. `records_skipped` é gerado como extraídos menos carregados
+em sucesso; vale zero em falha. `duration_ms` é não negativo para execuções
+finalizadas e nulo em `RUNNING`. Falhas têm zero carregados.
 Um índice por repositório e início facilita consultar execuções recentes.
 
 As constraints permitem `RUNNING` sem fim, `SUCCESS` com fim e sem erro, e
@@ -112,3 +116,13 @@ mantêm seu checkpoint por SHA na tabela original. [Fluxo e garantias](issues-pu
 Stars e forks históricos dependem de snapshots coletados ao longo do tempo;
 o estado atual de um repositório não reconstrói sua série histórica.
 O Activity Score só será criado após definição explícita de fórmula, pesos e janela.
+
+## Garantias adicionadas na Fase 5
+
+Datas finitas e cronologia válida são verificadas por constraints; títulos e
+identidades obrigatórias não podem ser vazios. Arrays de SHAs de pais também são
+validados. O checkpoint de commits possui FK composta para o SHA do mesmo
+repositório. Triggers diferidas exigem auditoria de sucesso do pipeline correto
+para gravar checkpoints. A leitura dos checkpoints rejeita auditoria inconsistente
+e watermarks futuros. Métricas, comportamento em falha e limites estão no
+[contrato operacional](pipeline.md).

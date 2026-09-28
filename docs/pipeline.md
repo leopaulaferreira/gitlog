@@ -1,252 +1,230 @@
-# Pipeline e execução
+# Pipeline: confiabilidade e operação
 
-## Fase 0
+A Fase 5 aprimora os quatro pipelines existentes: `repositories`, `commits`,
+`issues` e `pull-requests`. Não introduz novas fontes, transformações ou dashboards.
 
-No bootstrap, `make setup` instalava o pacote e as ferramentas e `make run`
-mostrava a ajuda. `gitlog --version` informa a versão instalada. Naquela fase,
-nenhum dado era extraído ou carregado.
-`make up` inicia PostgreSQL e aguarda o healthcheck; `make down` preserva o volume.
+## Fluxo
 
-Validação local:
-
-```bash
-make check
-make compose-check
+```mermaid
+flowchart TD
+    A[Auditoria RUNNING] --> B[GitHubClient: API e paginação]
+    B --> C[Raw JSON imutável]
+    C --> D[Validação e deduplicação]
+    D --> E[Transação PostgreSQL]
+    E --> F[UPSERT + checkpoint + auditoria SUCCESS]
+    B --> G[Falha]
+    C --> G
+    D --> G
+    E --> G
+    G --> H[Rollback e auditoria FAILED]
+    H --> I[Próximo repositório]
 ```
 
-### Validação realizada no bootstrap
+Cada par repositório/pipeline tem uma auditoria própria. O início é persistido
+antes da chamada à API. A página recebida é preservada integralmente antes de
+validar seus registros. O loader carrega somente campos tipados; campos extras
+continuam disponíveis no arquivo raw. A transação final confirma metadados,
+registros, checkpoint e `SUCCESS` juntos.
 
-| Verificação | Resultado |
-| --- | --- |
-| `make setup` e `pip check` no ambiente virtual | Instalação concluída, dependências compatíveis |
-| `make check` com Python 3.14 | Ruff e Black aprovados; 4 testes passaram |
-| Instalação não editável e pytest com Python 3.12 em container | 4 testes passaram; comando `gitlog --version` disponível |
-| `make compose-check` | Configuração válida |
-| Compose em projeto temporário com porta dinâmica | PostgreSQL chegou a `healthy` |
-| Conexão TCP autenticada e consulta SQL | Banco e usuário `gitlog`, `SELECT 1` bem-sucedido |
-| Processo principal do PostgreSQL | UID 999, sem root |
-| `git check-ignore` | `.env`, `.env.production`, `.venv`, dados e IDE ignorados |
+Raw usa arquivos locais imutáveis publicados após `fsync`, com partições UTC.
+Commits, issues e PRs possuem diretórios por entidade/repositório/data/run UUID,
+páginas e manifesto; repositories possui um snapshot por execução. Raw e banco
+não participam da mesma transação. Após falha, páginas preservadas permanecem
+para diagnóstico; pode não haver manifesto se a paginação não terminou.
 
-O container, a rede e o volume usados na validação foram removidos. Nenhuma
-chamada à API GitHub foi necessária. Essa verificação não testa ingestão ou
-persistência de entidades, que ainda não existiam no bootstrap.
+## Data Quality e integridade
 
-## Fase 1 — cliente HTTP
+Validação Pydantic ocorre antes da carga e constraints PostgreSQL protegem a
+persistência, inclusive contra gravações diretas:
 
-Na Fase 1, `GitHubClient` realizava consultas explícitas sem serviço de
-ingestão, e `make run` exibia ajuda. A classe lê `GITHUB_TOKEN` do ambiente
-e permite testar o acesso sem PostgreSQL. Veja o [contrato do cliente](github-client.md).
+- IDs e números obrigatórios, inteiros positivos; contagens não negativas.
+- Datas com timezone na entrada, datas finitas no banco; atualização, fechamento
+  e merge não podem anteceder a criação de issues/PRs. Commits podem ter datas
+  autorais antigas e fora de ordem, pois a extração usa SHAs, não essas datas.
+- Estado de issues/PRs limitado a `open` e `closed`; um PR merged deve estar fechado.
+- SHA e SHAs dos pais: 40 caracteres hexadecimais minúsculos.
+- Campos necessários ausentes, títulos vazios e identidades inconsistentes falham.
+  Autores removidos, datas opcionais e outros valores nulos permitidos pelo modelo
+  da fonte continuam válidos; o pipeline não inventa valores.
+- Foreign keys ligam entidades aos repositories e à auditoria. O checkpoint de
+  commits referencia um commit já carregado **do mesmo repositório**.
+- Triggers diferidas verificam, no commit, que checkpoints novos ou alterados
+  referenciam uma auditoria `SUCCESS` do pipeline correto.
 
-Os testes unitários usam mocks de HTTP e de tempo para validar os headers,
-timeouts, classificação de erros, paginação, redirects, rate limit e limites de
-retry. Nenhuma chamada à API real é feita na validação automatizada.
+Não há FK de `merge_commit_sha` ou `parent_shas` para commits: esses SHAs podem
+estar fora do histórico coletado. `full_name` não é chave de identidade, pois
+nomes de repositórios mudam e podem ser reutilizados; a chave é o ID do GitHub.
 
-### Validação realizada na Fase 1
+A migração `004_quality_observability.sql` adiciona as constraints, a duração e
+as métricas. Não modifica migrações anteriores. Dados que violam as novas
+constraints fazem a migração falhar e reverter; corrija a causa antes de repetir.
+Checkpoints legados também são validados ao serem lidos pelo pipeline e pelo
+`status`. Nenhum reset automático oculta inconsistências.
 
-| Verificação | Resultado |
-| --- | --- |
-| `make check` no Python 3.14 | Ruff e Black aprovados; 132 testes passaram |
-| Instalação não editável e pytest no Python 3.12 em container | 132 testes passaram |
-| Cobertura de `ingestion/client` no Python 3.12 | 100% das linhas executáveis e ramificações, usando coverage.py |
-| `pip check` | Dependências compatíveis |
-| `make compose-check` | Configuração válida; sem alterações no serviço PostgreSQL |
+## Deduplicação e idempotência
 
-A medição de cobertura usou uma ferramenta instalada somente no container
-temporário, sem adicionar dependência ao projeto. Cobertura não substitui uma
-validação com a API real: essa execução verificou contratos simulados, sem rede,
-persistência ou credenciais reais.
+| Entidade | Chave | Tratamento de repetição |
+| --- | --- | --- |
+| Repositories | ID GitHub | Compara campos da fonte; ignora resposta mais antiga |
+| Commits | `(repository_id, sha)` | Deduplica páginas e faz UPSERT somente se mudou |
+| Issues | ID GitHub; único `(repository_id, number)` | Seleciona ocorrência mais recente e usa `updated_at` no UPSERT |
+| Pull requests | ID da resposta `/pulls`; único `(repository_id, number)` | Mesmo tratamento temporal, separado de issues |
 
-## Fase 2 — repositories
+Conteúdos imutáveis conflitantes para o mesmo SHA dentro da carga ou um ID de
+issue/PR associado a números diferentes na mesma carga provocam rollback.
+Dados idênticos mantêm o arquivo e a auditoria da última mudança da fonte.
+Em repositories, `ingested_at` acompanha a observação mais recente mesmo quando
+idêntica: isso impede que uma resposta antiga ainda em trânsito sobrescreva o
+estado. Esse avanço operacional não aumenta `records_loaded`.
 
-```bash
-make setup
-# Configure .env: senhas do administrador e da ingestão, token e repositórios.
-make up
-make migrate
-make run
-```
+`/issues` contém PRs. A presença da chave `pull_request`, mesmo com valor nulo,
+determina a separação. Issues rejeita esses registros; PRs consulta `/pulls/{number}`
+e usa o ID da resposta de PR. As tabelas possuem unicidade individual; não há
+constraint entre elas. `status` verifica sobreposição de `(repository_id, number)`
+para revelar contaminação, inclusive por SQL administrativo. A ingestão normal
+mantém a separação por filtro e modelos próprios.
 
-`make migrate` usa as credenciais `POSTGRES_*` para aplicar migrações e provisionar
-`GITLOG_DB_USER` com `GITLOG_DB_PASSWORD`. Cada migração possui checksum e é aplicada
-uma vez; alterar um SQL já aplicado ou encontrar uma migração desconhecida causa
-erro. A role de ingestão deve ser separada do administrador e não pode ter flags
-administrativas ou associação a outras roles.
+Idempotência aplica-se às linhas de negócio. Cada tentativa gera nova auditoria
+e novos snapshots raw. Registros removidos da fonte não são apagados automaticamente;
+reconciliação de exclusões/transferências não faz parte desta fase.
 
-`make run` chama `gitlog repositories`. A CLI carrega `.env` do diretório atual
-sem substituir valores exportados e valida `GITLOG_REPOSITORIES`, removendo
-duplicatas sem diferenciar maiúsculas de minúsculas. Para cada repositório:
+## Checkpoints
 
-1. Registra uma execução `RUNNING` antes da consulta à API.
-2. Consulta o repositório usando o cliente HTTP existente.
-3. Preserva o JSON completo em arquivo imutável com nome UUID.
-4. Valida os campos necessários pelo modelo Pydantic.
-5. Executa UPSERT por ID do GitHub e registra `SUCCESS` na mesma transação.
-6. Em falha, registra `FAILED` com a classe do erro e continua no próximo repositório.
+Um advisory lock por entidade e repository ID protege a leitura e atualização
+contra duas execuções concorrentes do mesmo pipeline. Entidades distintas podem
+ser processadas independentemente. Conflito de lock falha aquela execução, sem
+sobrescrever o checkpoint de outra sessão.
 
-Se não conseguir iniciar ou finalizar a auditoria, o serviço interrompe a execução.
-A CLI retorna 0 em sucesso e 1 se houver falha de configuração, conexão ou ingestão.
-Logs JSON incluem repositório, execução, contagens e duração, sem corpos de erro.
+| Situação | Commits | Issues / PRs |
+| --- | --- | --- |
+| Primeira carga | Histórico da branch padrão fixado em SHA | Descoberta completa de abertos e fechados |
+| Incremental | Compare paginado entre checkpoint e ponta fixa | `since = watermark - 5 minutos` |
+| Sucesso | Confirma SHA carregado | Confirma instante anterior à descoberta, monotonicamente |
+| Nenhuma mudança | Mesma ponta: zero extraídos/carregados | Janela vazia ou sobreposição: zero carregados |
+| Repositório/janela vazia | Sem histórico inicial, não cria checkpoint | Janela concluída avança watermark, mesmo sem registros |
+| Falha de página, raw, validação ou SQL | Mantém checkpoint anterior | Mantém checkpoint anterior |
+| Checkpoint inconsistente | Falha antes de ingerir páginas | Falha antes de ingerir páginas |
 
-Particionamento implementado, sob `GITLOG_RAW_DIR` (padrão `data/raw`):
+A sobreposição temporal absorve mudanças próximas da fronteira; não oferece
+snapshot transacional da API. O watermark não depende da data máxima recebida.
+Uma janela incompleta jamais é considerada concluída. Watermarks futuros além
+de cinco minutos são rejeitados; mantenha relógios da aplicação e banco alinhados.
+
+Commits reconcilia todo o histórico quando muda a branch, a base deixa de estar
+acessível ou o histórico diverge. Commits já armazenados são mantidos. Use
+`--full-refresh` para reconciliar os registros disponíveis; essa opção não ignora
+um checkpoint inconsistente. Repositories consulta o estado atual a cada execução
+sem checkpoint separado. Mais detalhes: [commits](decisions/ADR-003-incremental-commits.md)
+e [issues/PRs](issues-pull-requests.md).
+
+## Retries e paginação
+
+Todos os extractors usam `GitHubClient`, sem duplicar lógica de HTTP. O cliente
+segue `Link: rel=next`, valida origem, detecta ciclos e limita páginas. Resposta
+curta não substitui o link como critério de término. Limites e detalhes estão no
+[contrato do cliente](github-client.md).
+
+O padrão é até três retries além da tentativa inicial, com backoff para erros
+transitórios. Rate limits primário/secundário respeitam `Retry-After` e reset,
+com espera máxima de 300 segundos por pausa; uma espera maior falha explicitamente.
+Timeouts e erros transitórios usam o orçamento de retries existente. Erros de
+autenticação, payload inválido e falhas SQL não recebem retry indiscriminado.
+Após corrigir a causa, reexecute: raw, UPSERT e checkpoint permitem recuperação.
+
+## Falhas e recuperação
+
+A unidade atômica é um repositório de uma entidade. Se a auditoria de falha puder
+ser persistida, a carga é revertida, registra `FAILED` e continua no próximo
+repositório. `all` executa repositories, commits, issues e PRs nessa ordem; falhas
+individuais não revertem sucessos independentes. A CLI termina com código 1 se
+qualquer carga falhar.
+
+Se o banco estiver indisponível no início, a chamada à API não começa. Se perder
+a conexão durante a transação ou não conseguir persistir o resultado, a execução
+aborta: continuar sem auditoria confiável esconderia falhas. O resumo usa
+`UNKNOWN` e carregados desconhecidos (`?`) quando a auditoria de falha não pode
+ser confirmada. `UNKNOWN` é um diagnóstico de processo, não um status persistido.
+
+Uma queda do processo/conexão pode deixar `RUNNING`, ou uma transação pode ter
+sido confirmada antes da conexão cair. Por isso o operador deve consultar `status`
+quando o banco voltar, conferir a auditoria e os arquivos raw, e reexecutar usando
+o último checkpoint confirmado. Não há reset automático, marcação por idade nem
+quarentena por registro. Um payload inválido reprova toda a unidade atômica.
+`RUNNING` indica auditoria pendente; não prova que um processo ainda está vivo.
+
+## Auditoria, métricas e logs
+
+`raw.pipeline_runs` contém UUID, pipeline, repositório, início/fim, status, caminho
+raw, classe de erro e as métricas abaixo:
+
+- `records_extracted`: registros recebidos da entidade, incluindo repetições.
+  Descoberta de PRs conta entradas com marcador; issues conta as entradas sem ele.
+- `records_loaded`: chaves distintas inseridas ou alteradas; zero em rollback.
+- `records_skipped`: extraídos menos carregados **apenas em sucesso**. Inclui
+  duplicatas, releituras idênticas e versões antigas. Em falha é zero, pois não
+  confunde registros revertidos/não processados com registros ignorados válidos.
+- `duration_ms`: tempo monotônico da execução até finalização; auditorias antigas
+  recebem duração calculada de início/fim. Permanece nulo enquanto `RUNNING`.
+
+`records_failed` não foi adicionado: a estratégia não rejeita linhas isoladas;
+atribuir uma contagem a um lote revertido seria ambíguo. Status, classe de erro e
+contagem extraída descrevem a falha. O contador `records_skipped` é gerado pelo
+banco para manter a relação entre métricas consistente.
+
+Logs JSON em stderr usam allowlist, com evento, timestamp UTC, componente,
+repositório, entidade e run ID. Chamadas HTTP e retries herdam a correlação da
+execução. Não registram tokens, senhas, corpo dos erros ou payloads. O evento
+`pipeline.summary` reúne métricas e status; a CLI imprime um resumo em stdout:
 
 ```text
-repositories/repository=octocat_hello-world/year=2026/month=09/day=27/<run_id>.json
+Repository: octocat/Hello-World | Entity: issues | Extracted: 152 | Loaded: 150 | Skipped: 2 | Status: SUCCESS | Duration: 8.400s
 ```
 
-A data é UTC. O arquivo temporário é sincronizado e publicado sem sobrescrever
-snapshots anteriores. O arquivo raw e a transação SQL não são atômicos entre si:
-um JSON preservado permanece após uma falha de validação ou carga. Uma interrupção
-ou perda do banco pode deixar a auditoria em `RUNNING`; recuperação automática
-ainda não está implementada.
+A duração do resumo inclui a conclusão do serviço e pode diferir ligeiramente
+da duração persistida, registrada dentro da transação.
 
-Repositories mantém o estado atual e consulta cada repositório a cada execução.
-Uma extração mais antiga não sobrescreve uma carga mais recente; nesse caso, a
-auditoria registra sucesso com zero registros carregados. Não há checkpoint ou
-carga incremental nesta fase.
+## Comando status
 
-### Validação da Fase 2
-
-`make check` executa Ruff, Black e os testes unitários. Os testes PostgreSQL são
-pulados sem a configuração do runner. `make test-integration` cria um projeto
-Compose temporário, banco `gitlog_test`, porta dinâmica e credenciais aleatórias;
-ao terminar, remove somente os recursos desse projeto. GitHub continua simulado.
-Fixtures JSON ficam restritas aos testes e não são usadas pela CLI de ingestão.
-
-A suíte verifica preservação raw, validação, UPSERT sem duplicatas, renomeação,
-rollback com auditoria, falhas individuais, migrações, permissões da role e CLI.
-`make compose-check` valida a configuração do Compose sem exibir credenciais.
-
-## Fase 3 — commits incrementais
-
-Após configurar `.env` e executar `make migrate`, use:
+Após `make migrate`, execute no ambiente virtual:
 
 ```bash
-make commits
-.venv/bin/gitlog commits --per-page 2  # Exercita paginação em históricos pequenos
-.venv/bin/gitlog commits --full-refresh
+python -m ingestion.main status
+python -m ingestion.main status --json
+# Ou: make status
 ```
 
-O exemplo de ambiente aponta para `leopaulaferreira/gitlog`. A CLI lê metadados do
-repositório, salva `repository.json` e resolve a branch padrão em uma referência
-fixa, preservada em `reference.json`. Não é necessário executar `make run` antes.
+Usa apenas configuração PostgreSQL e uma transação read-only com snapshot
+consistente. Não chama GitHub nem exige token/lista de repositórios. Exibe a última
+execução global, a última execução de cada pipeline/repositório que já possui
+auditoria, checkpoints, todas as auditorias `RUNNING` pendentes (mesmo se houver
+sucesso posterior) e contagem de sobreposições issue/PR. Pipeline nunca executado
+não aparece. O JSON expõe UUIDs e timestamps para investigação.
 
-Sem checkpoint, todas as páginas de commits alcançáveis pelo SHA fixado são lidas.
-Com checkpoint, o pipeline usa a comparação paginada entre SHAs; datas de commits
-antigos incorporados por merge não impedem a carga. A mesma ponta produz uma
-execução de sucesso com zero commits. Divergência, base indisponível ou troca de
-branch provocam reconciliação completa. Veja [ADR-003](decisions/ADR-003-incremental-commits.md).
+O código 0 significa que a consulta funcionou, inclusive quando ela mostra
+`FAILED`, `RUNNING` ou checkpoint `INCONSISTENT`; não é um healthcheck binário.
+Falha de conexão/configuração/consulta retorna 1. A consulta não altera estados.
 
-Cada página original é preservada antes da validação em:
+## Testes e cobertura
 
-```text
-data/raw/commits/repository=leopaulaferreira_gitlog/year=2026/month=09/day=27/<run_id>/
-  repository.json
-  reference.json
-  page-000001.json
-  page-000002.json
-  manifest.json
+```bash
+make check             # Ruff, Black e testes; integração pula sem banco isolado
+make test-integration  # PostgreSQL real em Compose temporário; remove ao terminar
+make coverage          # Ambas as suítes, linhas e branches de ingestion/
 ```
 
-O manifesto registra a branch, os SHAs, o modo, as páginas e a contagem extraída.
-Páginas e manifesto podem permanecer após falha SQL; o status definitivo fica em
-`raw.pipeline_runs`. Uma falha durante paginação pode deixar somente as primeiras
-páginas e nenhum manifesto. Uma resposta de repositório vazio termina com zero,
-sem criar checkpoint. O snapshot da referência pode estar ausente nesse caso.
+GitHub é simulado e a rede HTTP real é bloqueada nos testes. O runner usa banco
+`gitlog_test`, credenciais aleatórias e porta dinâmica, sem usar o banco local do
+projeto. Os testes cobrem paginação, retries 500/429, payload inválido, raw,
+UPSERT, estados, falhas parciais, constraints, migração com dados antigos,
+checkpoints vazios/inalterados/inconsistentes, perda de conexão, logs e status.
 
-O loader faz UPSERT pela chave `(repository_id, sha)`. Repetições entre páginas
-não duplicam linhas, e dados idênticos não são regravados. `records_extracted`
-conta os commits recebidos, inclusive quando a gravação raw falha;
-`records_loaded` conta chaves distintas inseridas ou alteradas. Em falha SQL,
-todos os commits dessa execução são revertidos e `records_loaded` fica zero.
+A cobertura combina testes unitários e PostgreSQL, priorizando decisões de
+checkpoint, rollback e classificação de erros. Subprocessos CLI de smoke tests
+não são instrumentados; chamadas diretas à CLI são medidas. Não há meta artificial
+de 100%. Os testes não demonstram disponibilidade da API externa nem simulam
+queda física do servidor no instante exato de confirmação da transação.
 
-Um lock por repository ID protege a leitura e atualização do checkpoint contra
-execuções concorrentes. A transação final inclui metadados, commits, checkpoint
-e auditoria. Se o processo cair, a execução pode permanecer `RUNNING`; a próxima
-carga usa o último checkpoint confirmado. Rate limit, retries, timeout, ciclos
-de paginação e limite de páginas reutilizam o cliente HTTP testado na Fase 1.
-
-### Verificação de duas cargas
-
-Execute `make commits` duas vezes sem novos pushes entre elas. Consulte:
-
-```sql
-SELECT id, status, records_extracted, records_loaded, started_at
-FROM raw.pipeline_runs
-WHERE pipeline_name = 'commit_ingestion'
-  AND lower(repository) = 'leopaulaferreira/gitlog'
-ORDER BY started_at DESC;
-
-SELECT repository_id, count(*) AS total, count(DISTINCT sha) AS unique_commits
-FROM raw.commits
-GROUP BY repository_id;
-
-SELECT repository_id, sha, count(*)
-FROM raw.commits
-GROUP BY repository_id, sha
-HAVING count(*) > 1;
-```
-
-A segunda carga deve registrar zero extraídos/carregados se a ponta não mudou;
-a última consulta não deve retornar linhas. Para verificar a deduplicação com
-releitura efetiva, execute `--full-refresh`: os registros idênticos continuam com
-zero carregados. A suíte de integração verifica esse comportamento, comparações
-com mais de 250 commits, falhas entre páginas, rollback, retry, locks e permissões.
-
-### Validação real em 2026-09-27
-
-Após publicar o histórico local em `leopaulaferreira/gitlog`, duas execuções reais
-com `--per-page 2` resultaram em:
-
-| Carga | Páginas de commits | Extraídos | Carregados | Total / únicos no banco |
-| --- | --- | --- | --- | --- |
-| Primeira | 7 | 13 | 13 | 13 / 13 |
-| Segunda, mesma ponta | 0 | 0 | 0 | 13 / 13 |
-
-Ambas terminaram com `SUCCESS`. A ponta validada foi
-`edd6c36829116b8e40d672e62fa1c8a492fdb3d9`. O relatório local fica em
-`data/validation/phase3-first-two-loads.json`; os dados raw e o relatório não são
-versionados. Esses números registram esse instante; novos commits ampliam o histórico.
-
-## Fase 4 — issues e pull requests
-
-`python -m ingestion.main issues`, `pull-requests` e `all` adicionam ingestão das
-duas entidades com raw por página, modelos próprios, UPSERT e checkpoints
-separados. PRs encontrados em `/issues` são excluídos da tabela de issues e
-hidratados em `/pulls/{number}` para preservar sua identidade correta.
-
-O comando `all` executa repositories, commits, issues e PRs, com transações e
-auditorias independentes. A migração 003 preserva os dados das fases anteriores.
-Veja [Issues e Pull Requests](issues-pull-requests.md) para os campos, incremental,
-semântica das métricas, testes e limites de reconciliação.
-
-## Contrato do MVP
-
-1. Ler e validar configuração e repositórios.
-2. Registrar execução e consultar checkpoint de commits por repositório.
-3. Extrair páginas da API com timeout e número limitado de tentativas.
-4. Preservar o JSON original antes da transformação.
-5. Validar e carregar entidades com queries parametrizadas e UPSERT.
-6. Confirmar dados e checkpoint de forma consistente após sucesso.
-7. Registrar resultado, contagens e duração sem expor segredos.
-
-Uma falha não deve avançar o checkpoint nem impedir a reexecução segura. Paginação,
-rate limit, transações e checkpoints incrementais já possuem testes.
-O armazenamento raw e a transação SQL não são
-atômicos entre si: arquivos já preservados podem permanecer após uma falha SQL.
-
-Particionamento raw implementado:
-
-```text
-data/raw/commits/repository=leopaulaferreira_gitlog/year=2026/month=09/day=27/<run_id>/
-```
-
-Os testes unitários do cliente usam mocks/fixtures, sem chamar a API real.
-Os testes do loader usam PostgreSQL de teste isolado. Dados de dashboard virão
-exclusivamente de coletas reais; fixtures ficarão restritas aos testes.
-
-## Aceitação do MVP
-
-Após configurar o token e iniciar o banco, o usuário pode ingerir repositories
-e commits, consultar ambos no PostgreSQL, repetir a execução sem duplicatas e
-executar `pytest` com sucesso. A Fase 3 implementa esse fluxo; testes de banco
-continuam disponíveis separadamente com `make test-integration`.
+Validação da Fase 5: 233 testes unitários e 116 testes de integração passaram.
+Ruff e Black aprovados. A medição de `ingestion/` cobriu 98,7% das linhas e 94,7%
+dos branches (98% combinado, arredondado pelo coverage.py). Os containers e volumes
+temporários usados nessa validação foram removidos.
