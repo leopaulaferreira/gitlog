@@ -7,16 +7,26 @@ services:
     profiles: [local]
 
   metabase:
+    restart: "no"
     environment:
       MB_DB_HOST: ubuntu-postgres-1
       MB_DB_DBNAME: gitlog_metabase
       MB_DB_USER: gitlog_metabase_app
       MB_SITE_URL: ${METABASE_SITE_URL:-https://gitlog.leofe.com.br}
       MB_ENCRYPTION_SECRET_KEY: ${MB_ENCRYPTION_SECRET_KEY:?Set MB_ENCRYPTION_SECRET_KEY in .env}
-      JAVA_OPTS: -Xmx384m -XX:+UseSerialGC -XX:ActiveProcessorCount=2
+      MB_DISABLE_AUTO_SYNC: "true"
+      JAVA_OPTS: -Xms96m -Xmx224m -XX:+UseSerialGC -XX:ActiveProcessorCount=1
     ports: !reset []
     depends_on: !reset []
-    mem_limit: 640m
+    mem_limit: 384m
+    memswap_limit: 384m
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 4
+      start_period: 15m
+    stop_grace_period: 30s
 
   dbt:
     environment:

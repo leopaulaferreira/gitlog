@@ -2,8 +2,8 @@
 
 A VM `amd64` com Docker Compose reutiliza a rede `ubuntu_default` e o PostgreSQL
 existente. O banco `gitlog` e o banco interno `gitlog_metabase` são independentes
-dos dados da aplicação já instalada. Metabase usa heap limitado a 384 MiB e teto
-de 640 MiB; não publica uma porta no host. O Nginx existente encaminha
+dos dados da aplicação já instalada. Metabase usa heap máximo de 224 MiB e teto
+de 384 MiB sem swap próprio; não publica uma porta no host. O Nginx encaminha
 `gitlog.leofe.com.br` para `metabase:3000` na rede Docker e atende TLS com
 certificado Let's Encrypt.
 
@@ -14,7 +14,7 @@ PostgreSQL já existente. Não publique a porta 5432.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.oracle.yml config --quiet
-docker compose -f docker-compose.yml -f docker-compose.oracle.yml up -d --wait metabase
+./deploy/oracle/start-metabase.sh
 docker compose -f docker-compose.yml -f docker-compose.oracle.yml run --rm ingestion migrate
 docker compose -f docker-compose.yml -f docker-compose.oracle.yml run --rm --entrypoint python ingestion scripts/provision_analytics.py
 docker compose -f docker-compose.yml -f docker-compose.oracle.yml run --rm ingestion all
@@ -36,13 +36,34 @@ O bloco de servidor usado está em `deploy/oracle/nginx-gitlog.conf`; ele foi
 adicionado à configuração existente sem substituir os hosts virtuais dos outros
 sites. O Nginx redireciona HTTP para HTTPS.
 
-Metabase precisa ficar saudável para o endereço servir a interface. Na VM
-atual, a inicialização parou em `Reading available locales` e o container foi
-mantido parado para preservar memória dos outros serviços; enquanto isso,
-HTTPS apresenta o certificado correto, mas a rota retorna 502. Em VMs com 1 GiB
-de RAM e outros serviços ativos, confira `docker stats`, `docker inspect gitlog-metabase-1`
-e o uso de swap durante a inicialização. A porta 3000 não deve ser publicada
-no host.
+Metabase precisa ficar saudável para o endereço servir a interface. No perfil
+Oracle, falhas não reiniciam o processo automaticamente, o healthcheck tolera
+15 minutos de startup, e syncs automáticos de metadados ficam desativados; o
+script de configuração ainda pode solicitar um sync explícito. O limite de
+memória e memória+swap igual protege os outros serviços se o Metabase ultrapassar
+seu envelope.
+
+Na VM de 1 GiB, prefira iniciar Metabase apenas durante demonstrações. Os scripts
+em `deploy/oracle` validam Compose, rede e PostgreSQL, mostram memória/swap/logs e
+param o container se a RAM disponível cair abaixo de 96 MiB, o swap crescer mais
+de 256 MiB ou o healthcheck não passar em 18 minutos:
+
+```bash
+./deploy/oracle/start-metabase.sh
+./deploy/oracle/status-metabase.sh
+./deploy/oracle/stop-metabase.sh
+```
+
+O início não apaga nem recria o banco `gitlog_metabase`. Investigue logs de uma
+falha de migration antes de tentar novamente; não limpe tabelas do Liquibase.
+A porta 3000 não deve ser publicada no host.
+
+No primeiro teste com esses limites, `/api/health` não ficou saudável e
+`docker stats` expirou durante o startup. O container terminou parado por
+intervenção, sem OOM; a memória usada pelo host voltou a cerca de 540 MiB e o
+swap ficou perto de 970 MiB, após pico próximo de 1 GiB. Os demais containers
+permaneceram ativos. Por isso, a configuração é para uso sob demanda, não para
+manter Metabase 24/7 nesta VM.
 
 ## Deploy automático pelo GitHub Actions
 
