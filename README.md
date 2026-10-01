@@ -2,6 +2,9 @@
 
 **Transformando a atividade do GitHub em dados estruturados e análises úteis.**
 
+<img width="1914" height="871" alt="Captura de tela de 2026-09-30 22-41-40" src="https://github.com/user-attachments/assets/cf17b5ee-cb0f-4bc6-8850-6bc7e9712285" />
+
+
 ## O que é o GitLog?
 
 GitLog é um projeto de portfólio de Engenharia de Dados e Software que irá
